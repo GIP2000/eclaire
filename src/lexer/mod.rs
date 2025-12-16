@@ -58,4 +58,4 @@ pub struct LexTokenData<'a> {
     raw: &'a str,
 }
 
-pub fn lex(input: impl std::io::Read) -> impl Iterator<Item = LexTokenData> {}
+// pub fn lex(input: impl std::io::Read) -> impl Iterator<Item = LexTokenData> {}
