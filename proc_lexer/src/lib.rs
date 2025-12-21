@@ -1,1 +1,2 @@
+mod dfa;
 mod trie;
