@@ -70,19 +70,27 @@ pub struct Lex<'a, M: Eq + std::fmt::Debug> {
     dfa: &'a DFA<M>,
     input: &'a str,
     start_pos: usize,
+    has_errored: bool,
 }
 
 impl<'a, M: Eq + std::fmt::Debug> Iterator for Lex<'a, M> {
-    type Item = M;
+    type Item = anyhow::Result<M>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.start_pos >= self.input.len() {
+        if self.has_errored || self.start_pos >= self.input.len() {
             return None;
         }
 
-        let (result, new_start) = self.dfa.get_next_lex(&self.input[self.start_pos..]).ok()?;
+        // TODO: I don't love that it doesn't error if it fails to lexj
+        let (result, new_start) = match self.dfa.get_next_lex(&self.input[self.start_pos..]) {
+            Ok(x) => x,
+            Err(_) => {
+                self.has_errored = true;
+                return Some(Err(anyhow::anyhow!("Failed to lex the next token")));
+            }
+        };
         self.start_pos += new_start;
-        Some(result)
+        Some(Ok(result))
     }
 }
 
@@ -166,6 +174,7 @@ impl<M: Eq + std::fmt::Debug> DFA<M> {
             dfa: self,
             input,
             start_pos: 0,
+            has_errored: false,
         }
     }
 
@@ -394,7 +403,11 @@ mod test {
         let combined: DFA<Tokens> = DFA::from_regexes(x.as_slice()).unwrap();
         let input = "if else \"hi there my name is greg\" if else   \"this is really crazy\" if";
 
-        let mut lex_iter = combined.lex(input).filter(|x| !matches!(x, Tokens::Space));
+        let mut lex_iter = combined.lex(input).filter_map(|x| {
+            x.ok()
+                .and_then(|x| (!matches!(x, Tokens::Space)).then_some(x))
+        });
+
         assert_eq!(lex_iter.next().unwrap(), Tokens::If);
         assert_eq!(lex_iter.next().unwrap(), Tokens::Else);
         assert_eq!(
