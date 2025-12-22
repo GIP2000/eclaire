@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use std::{
     collections::{HashSet, VecDeque},
-    str::FromStr,
+    iter::Peekable,
 };
 
 #[derive(Debug, Default, PartialEq, Clone)]
@@ -47,7 +47,7 @@ impl TrieMeta {
         }
     }
 
-    fn calculate_first_pass_from_char(c: &TerminalNodeElement, index: usize) -> Self {
+    fn calculate_first_pass_from_char<M>(c: &TerminalNodeElement<M>, index: usize) -> Self {
         let set = HashSet::from([index]);
         Self {
             nullable: c.is_nullable(),
@@ -58,60 +58,130 @@ impl TrieMeta {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct Trie {
-    pub(crate) root: TrieNode,
+pub(crate) struct Trie<M> {
+    pub(crate) root: TrieNode<M>,
     pub(crate) follow_pos: Vec<HashSet<usize>>,
     pub(crate) size: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum TerminalNodeElement {
-    Char(char),
-    Epsilon,
-    Accept,
+impl<M: std::fmt::Debug> Trie<M> {
+    pub(crate) fn from_regex(regex: &str, accept: fn(&str) -> Result<M>) -> Result<Self> {
+        let mut size = 0;
+
+        let root: TrieNode<M> =
+            TrieNode::from_iterator(&mut regex.chars().map(|x| x.into()).peekable(), &mut size)?
+                // Add the accept state to the end
+                .cat(TrieNode::<M>::terminal(
+                    TerminalNodeElement::Accept(accept),
+                    size,
+                ));
+        // increment the size to accomidate the accept state
+        size += 1;
+
+        let follow_pos = root.calculate_follow_pos(size);
+
+        Ok(Self {
+            root,
+            follow_pos,
+            size,
+        })
+    }
 }
 
-impl From<TerminalNodeElement> for usize {
-    fn from(value: TerminalNodeElement) -> Self {
-        match value {
-            TerminalNodeElement::Char(x) => x as usize,
-            TerminalNodeElement::Epsilon => unimplemented!("Think through epsilon more"),
-            TerminalNodeElement::Accept => char::MAX as usize + 1,
+pub(crate) type ConversionFn<M> = fn(&str) -> Result<M>;
+
+#[derive(Debug, Eq, Hash)]
+pub(crate) enum TerminalNodeElement<M> {
+    Char(char),
+    Epsilon,
+    Accept(ConversionFn<M>),
+}
+
+impl<M> Copy for TerminalNodeElement<M> {}
+
+impl<M> Clone for TerminalNodeElement<M> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Char(arg0) => Self::Char(arg0.clone()),
+            Self::Epsilon => Self::Epsilon,
+            Self::Accept(arg0) => Self::Accept(arg0.clone()),
         }
     }
 }
 
-impl From<char> for TerminalNodeElement {
+impl<M: Eq> Ord for TerminalNodeElement<M> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+impl<M> PartialOrd for TerminalNodeElement<M> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering;
+        use TerminalNodeElement::*;
+        match (self, other) {
+            (Char(a), Char(b)) => a.partial_cmp(b),
+            (Char(_), _) | (Accept(_), Epsilon) => Some(Ordering::Greater),
+            (Accept(_), Char(_)) | (Epsilon, Char(_)) | (Epsilon, Accept(_)) => {
+                Some(Ordering::Less)
+            }
+            (Accept(_), Accept(_)) | (Epsilon, Epsilon) => Some(Ordering::Equal),
+        }
+    }
+}
+
+impl<M> PartialEq for TerminalNodeElement<M> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Char(l0), Self::Char(r0)) => l0 == r0,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
+impl<M> From<TerminalNodeElement<M>> for usize {
+    fn from(value: TerminalNodeElement<M>) -> Self {
+        match value {
+            TerminalNodeElement::Char(x) => x as usize,
+            TerminalNodeElement::Epsilon => unimplemented!("Think through epsilon more"),
+            TerminalNodeElement::Accept(_) => char::MAX as usize + 1,
+        }
+    }
+}
+
+impl<M> From<char> for TerminalNodeElement<M> {
     fn from(value: char) -> Self {
         Self::Char(value)
     }
 }
 
-impl TerminalNodeElement {
+impl<M> TerminalNodeElement<M> {
     fn is_nullable(&self) -> bool {
         use TerminalNodeElement::*;
         match self {
-            Char(_) | Accept => false,
+            Char(_) | Accept(_) => false,
             Epsilon => true,
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum TrieNode {
-    CatNode(Box<TrieNode>, Box<TrieNode>, TrieMeta),
-    StarNode(Box<TrieNode>, TrieMeta),
-    OrNode(Box<TrieNode>, Box<TrieNode>, TrieMeta),
-    TerminalNode(TerminalNodeElement, TrieMeta, usize),
+pub(crate) enum TrieNode<M> {
+    CatNode(Box<TrieNode<M>>, Box<TrieNode<M>>, TrieMeta),
+    StarNode(Box<TrieNode<M>>, TrieMeta),
+    OrNode(Box<TrieNode<M>>, Box<TrieNode<M>>, TrieMeta),
+    TerminalNode(TerminalNodeElement<M>, TrieMeta, usize),
 }
 
-impl TrieNode {
+impl<M: std::fmt::Debug> TrieNode<M> {
     pub(crate) fn get_meta(&self) -> &TrieMeta {
+        use TrieNode::*;
+
         match self {
-            TrieNode::CatNode(_, _, trie_meta) => trie_meta,
-            TrieNode::StarNode(_, trie_meta) => trie_meta,
-            TrieNode::OrNode(_, _, trie_meta) => trie_meta,
-            TrieNode::TerminalNode(_, trie_meta, _) => trie_meta,
+            CatNode(_, _, trie_meta) => trie_meta,
+            StarNode(_, trie_meta) => trie_meta,
+            OrNode(_, _, trie_meta) => trie_meta,
+            TerminalNode(_, trie_meta, _) => trie_meta,
         }
     }
     fn cat(self, new_node: Self) -> Self {
@@ -127,26 +197,49 @@ impl TrieNode {
         Self::StarNode(Box::new(self), meta)
     }
 
-    fn terminal(c: impl Into<TerminalNodeElement>, index: usize) -> Self {
+    fn terminal(c: impl Into<TerminalNodeElement<M>>, index: usize) -> Self {
         let c = c.into();
         let meta = TrieMeta::calculate_first_pass_from_char(&c, index);
         Self::TerminalNode(c, meta, index)
     }
 
-    fn from_iterator(
-        iter: &mut impl Iterator<Item = TerminalNodeElement>,
+    pub(crate) fn build_from_regex(
+        regex: &str,
+        accept: ConversionFn<M>,
+        index: &mut usize,
+    ) -> Result<Self> {
+        let t =
+            TrieNode::from_iterator(&mut regex.chars().map(|x| x.into()).peekable(), index)?.cat(
+                TrieNode::<M>::terminal(TerminalNodeElement::Accept(accept.clone()), *index),
+            );
+        *index += 1;
+        Ok(t)
+    }
+
+    pub(crate) fn or_from_regex(
+        prev: Self,
+        regex: &str,
+        accept: ConversionFn<M>,
+        index: &mut usize,
+    ) -> Result<Self> {
+        Ok(prev.or(Self::build_from_regex(regex, accept, index)?))
+    }
+
+    fn from_iterator<I: Iterator<Item = TerminalNodeElement<M>>>(
+        iter: &mut Peekable<I>,
         index: &mut usize,
     ) -> Result<Self> {
         let mut is_escape = false;
         let mut root_node: Option<Self> = None;
 
         use TerminalNodeElement::*;
+        eprintln!("start new");
 
-        while let Some(next_char) = iter.next() {
-            match (&is_escape, next_char) {
+        while let (Some(next_char), peek) = (iter.next(), iter.peek()) {
+            match (&is_escape, next_char, peek) {
                 // Escape Section
-                (false, Char('\\')) => is_escape = true,
-                (true, Char('*')) => {
+                (false, Char('\\'), _) => is_escape = true,
+                (true, Char('*'), _) => {
                     root_node = Some(
                         root_node
                             .map(|t| t.cat(Self::terminal('*', *index)))
@@ -156,7 +249,7 @@ impl TrieNode {
                     *index += 1;
                     is_escape = false;
                 }
-                (true, Char('|')) => {
+                (true, Char('|'), _) => {
                     root_node = Some(
                         root_node
                             .map(|t| t.cat(Self::terminal('|', *index)))
@@ -167,9 +260,11 @@ impl TrieNode {
                     is_escape = false;
                 }
 
-                (false, Char('(')) => {
-                    let next_tree = Self::from_iterator(iter, index)?;
-
+                (false, Char('('), _) => {
+                    let mut next_tree = Self::from_iterator(iter, index)?;
+                    if matches!(iter.peek(), Some(Char('*'))) {
+                        next_tree = next_tree.star();
+                    }
                     // I can't use the .map(|| ..).unwrap_or(..) pattern cause of
                     // the borrow checker
                     root_node = Some(if let Some(r) = root_node {
@@ -178,17 +273,21 @@ impl TrieNode {
                         next_tree
                     });
                 }
-                (false, Char(')')) => break,
+                // (false, Char(')'), Some(Char('*'))) => {
+                //     root_node = root_node.map(|x| x.star());
+                //     break;
+                // }
+                (false, Char(')'), _) => break,
 
-                (false, Char('*')) => {
-                    root_node = Some(
-                        root_node
-                            .map(|x| x.star())
-                            .ok_or(anyhow!("'*' can't be the first character"))?,
-                    )
+                (false, Char('*'), _) => {
+                    // root_node = Some(
+                    //     root_node
+                    //         .map(|x| x.star())
+                    //         .ok_or(anyhow!("'*' can't be the first character"))?,
+                    // )
                 }
 
-                (false, Char('|')) => {
+                (false, Char('|'), _) => {
                     let next_tree = Self::from_iterator(iter, index)?;
                     root_node = Some(
                         root_node
@@ -198,7 +297,13 @@ impl TrieNode {
                     break;
                 }
 
-                (false, x) => {
+                (false, x, Some(Char('*'))) => {
+                    let new_node = || Self::terminal(x, *index).star();
+                    root_node = Some(root_node.map(|t| t.cat(new_node())).unwrap_or(new_node()));
+                    *index += 1;
+                }
+
+                (false, x, _) => {
                     root_node = Some(
                         root_node
                             .map(|t| t.cat(Self::terminal(x, *index)))
@@ -208,17 +313,20 @@ impl TrieNode {
                     *index += 1;
                 }
 
-                (true, _) => bail!("Invalid pattern"),
+                (true, _, _) => bail!("Invalid pattern"),
             };
+            eprintln!("node: {:?}", root_node);
         }
 
-        root_node.ok_or(anyhow!("Failed to find value"))
+        let result = root_node.ok_or(anyhow!("Failed to find value"));
+        eprintln!("ending: {:?}", result);
+        result
     }
 
     // TODO: Move this into the `from_iterator` function
     // I think I should be able to do this as I go
     // instead of doing another O(n) loop
-    fn calculate_follow_pos(&self, size: usize) -> Vec<HashSet<usize>> {
+    pub(crate) fn calculate_follow_pos(&self, size: usize) -> Vec<HashSet<usize>> {
         let mut stack = vec![self];
         let mut follow_pos = vec![HashSet::new(); size];
 
@@ -251,7 +359,7 @@ impl TrieNode {
         follow_pos
     }
 
-    pub(crate) fn get_refs(&self) -> Vec<(&TrieNode, TerminalNodeElement)> {
+    pub(crate) fn get_refs(&self) -> Vec<(&TrieNode<M>, TerminalNodeElement<M>)> {
         let mut refs = VecDeque::new();
         let mut stack = vec![self];
 
@@ -275,35 +383,47 @@ impl TrieNode {
     }
 }
 
-impl FromStr for Trie {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut size = 0;
-
-        let root = TrieNode::from_iterator(&mut s.chars().map(|x| x.into()), &mut size)?
-            // Add the accept state to the end
-            .cat(TrieNode::terminal(TerminalNodeElement::Accept, size));
-        // increment the size to accomidate the accept state
-        size += 1;
-
-        let follow_pos = root.calculate_follow_pos(size);
-
-        Ok(Self {
-            root,
-            follow_pos,
-            size,
-        })
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
 
+    fn to_string(x: &str) -> Result<String> {
+        Ok(x.to_string())
+    }
+
+    #[test]
+    fn test_str_type() {
+        let attempt = Trie::from_regex("c(a|b)*c", to_string).unwrap();
+
+        let correct = TrieNode::terminal('c', 0)
+            .cat(
+                TrieNode::terminal('a', 1)
+                    .or(TrieNode::terminal('b', 2))
+                    .star(),
+            )
+            .cat(TrieNode::terminal('c', 3))
+            .cat(TrieNode::terminal(
+                TerminalNodeElement::Accept(to_string),
+                4,
+            ));
+
+        assert_eq!(correct, attempt.root);
+
+        assert_eq!(
+            vec![
+                HashSet::from([1, 2, 3]),
+                HashSet::from([1, 2, 3]),
+                HashSet::from([1, 2, 3]),
+                HashSet::from([4]),
+                HashSet::from([]),
+            ],
+            attempt.follow_pos
+        );
+    }
+
     #[test]
     fn test_paren_a_or_b_star_paren_aab() {
-        let attempt: Trie = "(a|b)*aab".parse().unwrap();
+        let attempt = Trie::from_regex("(a|b)*aab", to_string).unwrap();
 
         let correct = TrieNode::terminal('a', 0)
             .or(TrieNode::terminal('b', 1))
@@ -311,7 +431,10 @@ mod test {
             .cat(TrieNode::terminal('a', 2))
             .cat(TrieNode::terminal('a', 3))
             .cat(TrieNode::terminal('b', 4))
-            .cat(TrieNode::terminal(TerminalNodeElement::Accept, 5));
+            .cat(TrieNode::terminal(
+                TerminalNodeElement::Accept(to_string),
+                5,
+            ));
 
         assert_eq!(correct, attempt.root);
 
@@ -330,7 +453,8 @@ mod test {
 
     #[test]
     fn test_a_or_b_star_aab() {
-        let attempt: Trie = "a|b*aab".parse().unwrap();
+        // let attempt: Trie<String> = "a|b*aab".parse().unwrap();
+        let attempt = Trie::from_regex("a|b*aab", to_string).unwrap();
 
         let correct = TrieNode::terminal('a', 0)
             .or(TrieNode::terminal('b', 1)
@@ -338,7 +462,10 @@ mod test {
                 .cat(TrieNode::terminal('a', 2))
                 .cat(TrieNode::terminal('a', 3))
                 .cat(TrieNode::terminal('b', 4)))
-            .cat(TrieNode::terminal(TerminalNodeElement::Accept, 5));
+            .cat(TrieNode::terminal(
+                TerminalNodeElement::Accept(to_string),
+                5,
+            ));
 
         assert_eq!(correct, attempt.root);
 
@@ -357,11 +484,15 @@ mod test {
 
     #[test]
     fn test_a_or_b_star() {
-        let attempt: Trie = "a|b*".parse().unwrap();
+        // let attempt: Trie<String> = "a|b*".parse().unwrap();
+        let attempt = Trie::from_regex("a|b*", to_string).unwrap();
 
         let correct = TrieNode::terminal('a', 0)
             .or(TrieNode::terminal('b', 1).star())
-            .cat(TrieNode::terminal(TerminalNodeElement::Accept, 2));
+            .cat(TrieNode::terminal(
+                TerminalNodeElement::Accept(to_string),
+                2,
+            ));
 
         assert_eq!(correct, attempt.root);
 
