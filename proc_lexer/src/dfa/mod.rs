@@ -76,7 +76,6 @@ impl<'a, M: Eq + std::fmt::Debug> Iterator for Lex<'a, M> {
     type Item = M;
 
     fn next(&mut self) -> Option<Self::Item> {
-        eprintln!("start pos = {:?}", self.start_pos);
         if self.start_pos >= self.input.len() {
             return None;
         }
@@ -214,10 +213,7 @@ impl<M: Eq + std::fmt::Debug> DFA<M> {
                     result = ResultState::AcceptAt(input_idx, f.clone());
                 }
             }
-            eprintln!("get_next_lex_result = {:?}", result);
         }
-
-        eprintln!("get_next_lex_result = {:?}", result);
 
         match result {
             ResultState::AcceptAt(end, f) => f(&input[..end]).map(|x| (x, end)),
@@ -232,14 +228,11 @@ impl<M: Eq + std::fmt::Debug> DFA<M> {
 
         for a in &mut iter {
             let t = &self[(state, a)];
-            eprintln!("state = {state} a = {a:?}, val = {:?}", t);
             match t {
                 Normal(i) | AccpetOr(i, _) => state = *i,
                 Fail | Accpet(_) => return false,
             }
         }
-
-        eprintln!("state = {state}, val = {:?}", &self[(state, '\0')]);
 
         self[(state, '\0')].is_accpet()
     }
@@ -397,8 +390,8 @@ mod test {
                 |x| Ok(Tokens::String(x[1..x.len() - 1].to_owned())),
             ),
         ];
-        let combined: DFA<Tokens> = DFA::from_regexes(x.as_slice()).unwrap();
 
+        let combined: DFA<Tokens> = DFA::from_regexes(x.as_slice()).unwrap();
         let input = "if else \"hi there my name is greg\" if else   \"this is really crazy\" if";
 
         let mut lex_iter = combined.lex(input).filter(|x| !matches!(x, Tokens::Space));

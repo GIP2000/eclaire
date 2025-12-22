@@ -233,7 +233,6 @@ impl<M: std::fmt::Debug> TrieNode<M> {
         let mut root_node: Option<Self> = None;
 
         use TerminalNodeElement::*;
-        eprintln!("start new");
 
         while let (Some(next_char), peek) = (iter.next(), iter.peek()) {
             match (&is_escape, next_char, peek) {
@@ -315,11 +314,9 @@ impl<M: std::fmt::Debug> TrieNode<M> {
 
                 (true, _, _) => bail!("Invalid pattern"),
             };
-            eprintln!("node: {:?}", root_node);
         }
 
         let result = root_node.ok_or(anyhow!("Failed to find value"));
-        eprintln!("ending: {:?}", result);
         result
     }
 
