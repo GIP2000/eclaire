@@ -69,6 +69,21 @@ impl IndexMut<usize> for DFA {
 }
 
 impl DFA {
+    fn states_len(&self) -> usize {
+        self.d_trans.len()
+    }
+
+    fn debug_print(&self, letters: &str) {
+        eprintln!("dfa states {:?}\n", self.states_len());
+        let letters: BTreeSet<_> = letters.chars().collect();
+        for i in 0..self.states_len() {
+            for a in letters.iter() {
+                eprintln!("delta[({}, '{}')] = {:?}", i, a, self[(i, *a)]);
+            }
+            eprint!("\n");
+        }
+    }
+
     pub fn is_match(&self, input: &str) -> bool {
         use TransitionType::*;
         let mut state = 0;
@@ -76,12 +91,14 @@ impl DFA {
 
         for a in &mut iter {
             let t = &self[(state, a)];
-            eprintln!("state = {state}\na={a}\nt={t:?}");
+            // eprintln!("state = {state} a = {a:?}, val = {:?}", t);
             match t {
                 Normal(i) | AccpetOr(i) => state = *i,
                 Fail | Accpet => return false,
             }
         }
+
+        // eprintln!("state = {state}, val = {:?}", &self[(state, '\0')]);
 
         self[(state, '\0')].is_accpet()
     }
@@ -111,65 +128,6 @@ impl FromStr for DFA {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let t: Trie = s.parse()?;
         Ok(t.into())
-    }
-}
-
-impl From<&[DFA]> for DFA {
-    fn from(value: &[DFA]) -> Self {
-        let lengths: Box<_> = value.iter().map(|x| x.d_trans.len()).collect();
-        let new_len = lengths.iter().product();
-        let after_len: Box<_> = lengths
-            .iter()
-            .enumerate()
-            .map(|(i, l)| *l / lengths.iter().skip(i + 1).product::<usize>())
-            .collect();
-
-        let mut d_trans = vec![vec![TransitionType::Fail; DFA_SIZE].into_boxed_slice(); new_len]
-            .into_boxed_slice();
-
-        for (i, state) in d_trans.iter_mut().enumerate() {
-            let dfa_i_as: Box<_> = after_len
-                .iter()
-                .enumerate()
-                .map(|(j, following_len)| (i / following_len) % lengths[j])
-                .zip(value.iter())
-                .map(|(idx, dfa)| (idx, &dfa[idx]))
-                .collect();
-
-            for a in 0..DFA_SIZE {
-                use TransitionType::*;
-                let (is_accpet, all_fail, all_naked_accpet, j) = dfa_i_as
-                    .iter()
-                    .map(|(idx, x)| (idx, x[a]))
-                    .enumerate()
-                    .fold(
-                        (false, true, true, 0usize),
-                        |(is_accpet, all_fail, all_naked_accpet, j), (dfa_idx, (og, t))| {
-                            let new_j = |input: usize| j + after_len[dfa_idx] * input;
-                            match t {
-                                Normal(idx) => (is_accpet, false, false, new_j(idx)),
-                                AccpetOr(idx) => (true, false, false, new_j(idx)),
-
-                                // I don't know if this is right
-                                Fail => (is_accpet, all_fail, false, new_j(*og)),
-                                Accpet => (true, false, all_naked_accpet, new_j(*og)),
-                            }
-                        },
-                    );
-
-                state[a] = if all_fail {
-                    Fail
-                } else if all_naked_accpet {
-                    Accpet
-                } else if is_accpet {
-                    AccpetOr(j)
-                } else {
-                    Normal(j)
-                };
-            }
-        }
-
-        Self { d_trans }
     }
 }
 
@@ -284,6 +242,17 @@ mod test {
     use super::*;
 
     #[test]
+    fn test_combine() {
+        let combined: DFA = "(if)|(elif)".parse().unwrap();
+        combined.debug_print("ifel");
+
+        assert!(combined.is_match("elif"));
+        assert!(combined.is_match("if"));
+        assert!(!combined.is_match("else"));
+        assert!(!combined.is_match("ifelse"));
+    }
+
+    #[test]
     fn test_contains() {
         let dfa: DFA = "(a|b)*abb".parse().unwrap();
         assert!(dfa.contains("aaaaaaabbaaaaaaa"));
@@ -298,6 +267,8 @@ mod test {
         assert!(dfa.is_match("aaaaaabbbbbbbbbbbbbaaaaaaabb"));
         assert!(!dfa.is_match("aaaaaaabbaaaa"));
         assert!(!dfa.is_match("cabb"));
+        assert!(!dfa.is_match("abbc"));
+        assert!(dfa.is_match("abb"));
     }
 
     #[test]
@@ -305,7 +276,7 @@ mod test {
         let dfa: DFA = "(a|b)*abb".parse().unwrap();
 
         use TransitionType::*;
-        assert_eq!(dfa.d_trans.len(), 4);
+        assert_eq!(dfa.states_len(), 4);
         assert_eq!(dfa[(0, 'a')], Normal(1));
         assert_eq!(dfa[(0, 'b')], Normal(0));
         assert_eq!(dfa[(0, 'c')], Fail);
