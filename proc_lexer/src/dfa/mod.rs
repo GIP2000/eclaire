@@ -114,7 +114,7 @@ impl<'a> DFA<'a, Box<str>> for DFABoxed {
         let mut state = 0;
         let mut result = ResultState::Fail;
 
-        for (input_idx, a) in input.bytes().enumerate() {
+        for (input_idx, a) in input.bytes().chain(std::iter::once(b'\0')).enumerate() {
             let t = &self[(state, a)];
 
             match t {
@@ -366,6 +366,7 @@ mod test {
         assert_eq!(lex_iter.next().unwrap(), "if".into());
         assert_eq!(lex_iter.next().unwrap(), "else".into());
         assert_eq!(lex_iter.next().unwrap(), "\"this is really crazy\"".into());
+        assert_eq!(lex_iter.next().unwrap(), "if".into());
         assert_eq!(lex_iter.next(), None);
     }
 
@@ -406,6 +407,30 @@ mod test {
     }
 
     #[test]
+    fn test_combine_nested() {
+        let x: [(Box<str>, Box<str>); 3] = [
+            ("==".into(), "".into()),
+            ("=".into(), "".into()),
+            (" ".into(), "".into()),
+        ];
+
+        let combined: DFABoxed = DFABoxed::from_regexes(x.into_iter()).unwrap();
+        let input = "= == === = =";
+
+        let mut lex_iter = combined
+            .lex(input)
+            .filter_map(|x| x.ok().and_then(|x| (x != " ".into()).then_some(x)));
+
+        assert_eq!(lex_iter.next().unwrap(), "=".into());
+        assert_eq!(lex_iter.next().unwrap(), "==".into());
+        assert_eq!(lex_iter.next().unwrap(), "==".into());
+        assert_eq!(lex_iter.next().unwrap(), "=".into());
+        assert_eq!(lex_iter.next().unwrap(), "=".into());
+        assert_eq!(lex_iter.next().unwrap(), "=".into());
+        assert_eq!(lex_iter.next(), None);
+    }
+
+    #[test]
     fn test_combine() {
         let x: [(Box<str>, Box<str>); 2] = [("if".into(), "".into()), ("elif".into(), "".into())];
         let combined: DFABoxed = DFABoxed::from_regexes(x.into_iter()).unwrap();
@@ -434,6 +459,15 @@ mod test {
         assert!(!dfa.is_match("cabb"));
         assert!(!dfa.is_match("abbc"));
         assert!(dfa.is_match("abb"));
+    }
+
+    #[test]
+    fn test_dot() {
+        let dfa: DFABoxed = Trie::from_regex("\".*\"", "".into()).unwrap().into();
+        assert!(dfa.is_match("\"hello there my name is aASDF!@#A12309adsjfklasdf'\\DF\""));
+        assert!(!dfa.is_match("\"hello there my name is aASDF!@#ADF"));
+        assert!(!dfa.is_match("hello there my name is aASDF!@#ADF"));
+        assert!(!dfa.is_match("hello there my name is aASDF!@#ADF\""));
     }
 
     #[test]

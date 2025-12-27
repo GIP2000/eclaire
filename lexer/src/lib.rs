@@ -90,19 +90,32 @@ impl<'a, M: std::fmt::Debug, D: DFA<'a, M>> Iterator for Lex<'a, M, D> {
     type Item = anyhow::Result<M>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        eprintln!(
+            "new next start_pos = {}, len = {}, is_error = {}",
+            self.start_pos,
+            self.input.len(),
+            self.has_errored
+        );
         if self.has_errored || self.start_pos >= self.input.len() {
             return None;
         }
 
-        // TODO: I don't love that it doesn't error if it fails to lexj
+        eprintln!(
+            "got past the if gaurd rest = {:?}",
+            &self.input[self.start_pos..]
+        );
+
         let (result, new_start) = match self.dfa.get_next_lex(&self.input[self.start_pos..]) {
             Ok(x) => x,
-            Err(_) => {
+            Err(err) => {
+                eprintln!("error found: {err:?}");
                 self.has_errored = true;
                 return Some(Err(anyhow::anyhow!("Failed to lex the next token")));
             }
         };
+
         self.start_pos += new_start;
+        eprintln!("found {result:?}, new_start = {:?}", self.start_pos);
         Some(Ok(result))
     }
 }

@@ -4,6 +4,8 @@ use std::{
     iter::Peekable,
 };
 
+use crate::DFA_SIZE;
+
 #[derive(Debug, Default, PartialEq, Clone)]
 pub(crate) struct TrieMeta {
     pub(crate) nullable: bool,
@@ -221,6 +223,68 @@ impl TrieNode {
         Ok(prev.or(Self::build_from_regex(regex, accept, index)?))
     }
 
+    fn handle_bracket<I: Iterator<Item = TerminalNodeElement>>(
+        iter: &mut Peekable<I>,
+        index: &mut usize,
+    ) -> Result<Self> {
+        let mut root_node: Option<Self> = None;
+
+        use TerminalNodeElement::*;
+
+        while let (Some(next_char), peek) = (iter.next(), iter.peek()) {
+            match (next_char, peek) {
+                (Char(b'\\'), Some(Char(b'-')) | Some(Char(b'[')) | Some(Char(b']'))) => {
+                    // normal with escaped chars
+                    let value = iter.next().expect("I checked with the peek");
+                    root_node = Some(
+                        root_node
+                            .map(|t| t.or(Self::terminal(value.clone(), *index)))
+                            .unwrap_or(Self::terminal(value, *index)),
+                    );
+                    *index += 1;
+                }
+                (Char(b']'), _) => {
+                    return root_node.ok_or(anyhow!("Error unallowed empty bracket"));
+                } // end
+                (a, Some(Char(b'-'))) => {
+                    let _ = iter.next().expect("I checked with the peek");
+                    let b = iter
+                        .next()
+                        .ok_or(anyhow!("Error invalid pattern \"a-\" without a 'b'"))?;
+
+                    let (mut a, b) = match (a, b) {
+                        (Char(a), Char(b)) => (a, b),
+                        _ => bail!("Error: Invalid token on other side of -"),
+                    };
+
+                    let mut node = root_node.unwrap_or_else(|| {
+                        let node = Self::terminal(a, *index);
+                        a += 1;
+                        *index += 1;
+                        node
+                    });
+
+                    for a in a..=b {
+                        node = node.or(Self::terminal(a, *index));
+                        *index += 1;
+                    }
+
+                    root_node = Some(node);
+                } // range
+                (value, _) => {
+                    root_node = Some(
+                        root_node
+                            .map(|t| t.or(Self::terminal(value.clone(), *index)))
+                            .unwrap_or(Self::terminal(value, *index)),
+                    );
+                    *index += 1;
+                } // normal
+            };
+        }
+
+        bail!("Failed to find end ']' in regex")
+    }
+
     fn from_iterator<I: Iterator<Item = TerminalNodeElement>>(
         iter: &mut Peekable<I>,
         index: &mut usize,
@@ -231,7 +295,6 @@ impl TrieNode {
         use TerminalNodeElement::*;
 
         while let (Some(next_char), peek) = (iter.next(), iter.peek()) {
-            eprintln!("next_char = {:?}", next_char);
             match (&is_escape, next_char, peek) {
                 // Escape Section
                 (false, Char(b'\\'), _) => is_escape = true,
@@ -245,6 +308,37 @@ impl TrieNode {
                     *index += 1;
                     is_escape = false;
                 }
+                (true, Char(b'.'), _) => {
+                    root_node = Some(
+                        root_node
+                            .map(|t| t.cat(Self::terminal(b'.', *index)))
+                            .unwrap_or(Self::terminal(b'.', *index)),
+                    );
+
+                    *index += 1;
+                    is_escape = false;
+                }
+                (true, Char(b'['), _) => {
+                    root_node = Some(
+                        root_node
+                            .map(|t| t.cat(Self::terminal(b'[', *index)))
+                            .unwrap_or(Self::terminal(b'[', *index)),
+                    );
+
+                    *index += 1;
+                    is_escape = false;
+                }
+                (true, Char(b']'), _) => {
+                    root_node = Some(
+                        root_node
+                            .map(|t| t.cat(Self::terminal(b']', *index)))
+                            .unwrap_or(Self::terminal(b']', *index)),
+                    );
+
+                    *index += 1;
+                    is_escape = false;
+                }
+
                 (true, Char(b'*'), _) => {
                     root_node = Some(
                         root_node
@@ -286,6 +380,17 @@ impl TrieNode {
                     is_escape = false;
                 }
 
+                (false, Char(b'['), _) => {
+                    let mut next_tree = Self::handle_bracket(iter, index)?;
+                    if matches!(iter.peek(), Some(Char(b'*'))) {
+                        next_tree = next_tree.star();
+                    }
+
+                    root_node = Some(match root_node {
+                        Some(t) => t.cat(next_tree),
+                        None => next_tree,
+                    });
+                }
                 (false, Char(b'('), _) => {
                     let mut next_tree = Self::from_iterator(iter, index)?;
                     if matches!(iter.peek(), Some(Char(b'*'))) {
@@ -293,10 +398,9 @@ impl TrieNode {
                     }
                     // I can't use the .map(|| ..).unwrap_or(..) pattern cause of
                     // the borrow checker
-                    root_node = Some(if let Some(r) = root_node {
-                        r.cat(next_tree)
-                    } else {
-                        next_tree
+                    root_node = Some(match root_node {
+                        Some(r) => r.cat(next_tree),
+                        None => next_tree,
                     });
                 }
                 (false, Char(b')'), _) => break,
@@ -312,22 +416,56 @@ impl TrieNode {
                 }
 
                 (false, x, Some(Char(b'*'))) => {
-                    root_node = Some(
-                        root_node
-                            .map(|t| t.cat(Self::terminal(x.clone(), *index).star()))
-                            .unwrap_or(Self::terminal(x, *index).star()),
-                    );
-                    *index += 1;
+                    let node = if let Char(b'.') = x {
+                        let mut node = Self::terminal(0, *index);
+                        *index += 1;
+                        for a in 1..DFA_SIZE {
+                            node =
+                                node.or(Self::terminal(TerminalNodeElement::Char(a as u8), *index));
+                            *index += 1;
+                        }
+
+                        node
+                    } else {
+                        let node = Self::terminal(x.clone(), *index);
+                        *index += 1;
+                        node
+                    };
+
+                    root_node = Some(match root_node {
+                        Some(t) => t.cat(node.star()),
+                        None => node.star(),
+                    });
                 }
 
                 (false, x, _) => {
-                    root_node = Some(
-                        root_node
-                            .map(|t| t.cat(Self::terminal(x.clone(), *index)))
-                            .unwrap_or(Self::terminal(x, *index)),
-                    );
+                    let node = if let Char(b'.') = x {
+                        let mut node = Self::terminal(0, *index);
+                        *index += 1;
+                        for a in 1..DFA_SIZE {
+                            node =
+                                node.or(Self::terminal(TerminalNodeElement::Char(a as u8), *index));
+                            *index += 1;
+                        }
 
-                    *index += 1;
+                        node
+                    } else {
+                        let node = Self::terminal(x.clone(), *index);
+                        *index += 1;
+                        node
+                    };
+
+                    root_node = Some(match root_node {
+                        Some(t) => t.cat(node),
+                        None => node,
+                    });
+
+                    // root_node = Some(
+                    //     root_node
+                    //         .map(|t| t.cat(Self::terminal(x.clone(), *index)))
+                    //         .unwrap_or(Self::terminal(x, *index)),
+                    // );
+                    // *index += 1;
                 }
 
                 (true, _, _) => bail!("Invalid pattern"),
@@ -531,6 +669,27 @@ mod test {
 
         assert_eq!(correct, attempt.root);
     }
+}
+
+fn test_bracket() {
+    let attempt = Trie::from_regex("[a-d]", "to_string".into()).unwrap();
+
+    let correct = TrieNode::terminal(b'a', 0)
+        .or(TrieNode::terminal(b'b', 1))
+        .or(TrieNode::terminal(b'c', 2))
+        .or(TrieNode::terminal(b'd', 3));
+    assert_eq!(correct, attempt.root);
+}
+
+fn test_bracket_star() {
+    let attempt = Trie::from_regex("[a-d]*", "to_string".into()).unwrap();
+
+    let correct = TrieNode::terminal(b'a', 0)
+        .or(TrieNode::terminal(b'b', 1))
+        .or(TrieNode::terminal(b'c', 2))
+        .or(TrieNode::terminal(b'd', 3))
+        .star();
+    assert_eq!(correct, attempt.root);
 }
 fn test_mult() {
     let attempt = Trie::from_regex("\\*", "to_string".into()).unwrap();
