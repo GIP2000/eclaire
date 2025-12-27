@@ -2,6 +2,7 @@ extern crate proc_macro;
 mod dfa;
 mod trie;
 
+use dfa::{DFABoxed, DFA_SIZE};
 use lexer::DFA;
 use proc_macro::TokenStream;
 
@@ -11,43 +12,32 @@ use syn::{
     parse_macro_input, Data, DeriveInput, Ident, LitStr,
 };
 
-use dfa::DFABoxed;
-
-use crate::dfa::DFA_SIZE;
-
 struct RegexAttributeArgs {
     regex_pattern: Box<str>,
-    func_name: Box<str>,
+    func_name: Option<Box<str>>,
 }
 
 impl Parse for RegexAttributeArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        eprintln!("starting");
-        // Parse the first argument, which should be the regex string literal
         let regex_pattern: LitStr = input.parse()?;
-        eprintln!("litstr = {:?}", regex_pattern);
         let regex_pattern = regex_pattern.value().into();
-        // let regex_pattern = regex_pattern.token().to_string().into();
-        eprintln!("pattern = {}", regex_pattern);
 
-        // Expect a comma after the regex pattern
-        let _comma_token: syn::token::Comma = input.parse()?;
+        let _comma: syn::Result<syn::token::Comma> = input.parse();
 
-        // Parse the identifier for 'func'
-        let func_ident: Ident = input.parse()?;
-        if func_ident != "func" {
-            return Err(input.error("Expected `func` as the second argument key"));
-        }
+        let func_name = match input.parse::<Ident>() {
+            Ok(func_ident) => {
+                if func_ident != "func" {
+                    return Err(input.error("Expected `func` as the second argument key"));
+                }
 
-        // Parse the `=` sign
-        let _eq_token: syn::Token![=] = input.parse()?;
+                let _eq_token: syn::Token![=] = input.parse()?;
 
-        // Parse the identifier for the function name
-        let func_name: Ident = input.parse()?;
+                let func_name: Ident = input.parse()?;
 
-        let func_name = func_name.to_string().into();
-
-        eprintln!("finishing {:?} {:?}", regex_pattern, func_name);
+                Some(func_name.to_string().into())
+            }
+            Err(_) => None,
+        };
 
         Ok(RegexAttributeArgs {
             regex_pattern,
@@ -66,23 +56,56 @@ pub fn build_dfa(_att: TokenStream, input: TokenStream) -> TokenStream {
         _ => panic!("#[build_dfa] can only be applied to enums"),
     };
 
+    let lifetime_count = &input_enum.generics.lifetimes().count();
+
     let regexes = data.variants.iter().flat_map(|variant| {
-        variant.attrs.iter().filter_map(|att| {
+        let ident = &variant.ident;
+        variant.attrs.iter().enumerate().filter_map(move |(ia, att)| {
             if !att.path().is_ident("regex") {
                 return None;
             }
-            att.parse_args::<RegexAttributeArgs>()
+            let (regex, maybe_name) = att
+                .parse_args::<RegexAttributeArgs>()
                 .ok()
-                .map(|x| (x.regex_pattern, x.func_name))
+                .map(|x| (x.regex_pattern, x.func_name))?;
+
+            match (maybe_name, &variant.fields) {
+                (Some(name), _) => return Some(((regex, name), None)),
+                (None, syn::Fields::Unit) => {
+                    let name = Ident::new(
+                        &format!("__parse_{}_{}__", ident, ia),
+                        proc_macro2::Span::call_site(),
+                    );
+
+                    let func_impl = match lifetime_count {
+                        1 => {
+                            quote! {fn #name<'a>(input: &'a str) -> anyhow::Result<#enum_name<'a>> {
+                                Ok(#enum_name::#ident)
+                            }}
+                        }
+                        0 => quote! {fn #name<'a>(input: &'a str) -> anyhow::Result<#enum_name> {
+                            Ok(#enum_name::#ident)
+                        }},
+                        _ => panic!("Invalid amount of lifetime parameters"),
+                    };
+                    return Some(((regex, name.to_string().into()), Some(func_impl)));
+                }
+                _ => {
+                    panic!("#[build_dfa] func required if variant has data");
+                }
+            };
         })
     });
+    let (regexes, funcs): (Vec<_>, Vec<_>) = regexes.unzip();
 
-    let dfa = match DFABoxed::from_regexes(regexes) {
+    let dfa = match DFABoxed::from_regexes(regexes.into_iter()) {
         Ok(x) => x,
         Err(e) => {
             panic!("Failed to compile regexes to dfa: {e:?}");
         }
     };
+
+    let funcs: Box<_> = funcs.into_iter().filter_map(|x| x).collect();
 
     data.variants.iter_mut().for_each(|variant| {
         variant.attrs.retain(|attr| !attr.path().is_ident("regex"));
@@ -135,6 +158,7 @@ pub fn build_dfa(_att: TokenStream, input: TokenStream) -> TokenStream {
             d_trans: #arr,
         };
 
+        #(#funcs)*
 
     };
 

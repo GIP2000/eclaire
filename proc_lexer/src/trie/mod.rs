@@ -235,8 +235,17 @@ impl TrieNode {
             match (&is_escape, next_char, peek) {
                 // Escape Section
                 (false, Char(b'\\'), _) => is_escape = true,
+                (true, Char(b'\\'), _) => {
+                    root_node = Some(
+                        root_node
+                            .map(|t| t.cat(Self::terminal(b'\\', *index)))
+                            .unwrap_or(Self::terminal(b'\\', *index)),
+                    );
+
+                    *index += 1;
+                    is_escape = false;
+                }
                 (true, Char(b'*'), _) => {
-                    eprintln!("in escaped *");
                     root_node = Some(
                         root_node
                             .map(|t| t.cat(Self::terminal(b'*', *index)))
@@ -251,6 +260,26 @@ impl TrieNode {
                         root_node
                             .map(|t| t.cat(Self::terminal(b'|', *index)))
                             .unwrap_or(Self::terminal(b'|', *index)),
+                    );
+
+                    *index += 1;
+                    is_escape = false;
+                }
+                (true, Char(b'('), _) => {
+                    root_node = Some(
+                        root_node
+                            .map(|t| t.cat(Self::terminal(b'(', *index)))
+                            .unwrap_or(Self::terminal(b'(', *index)),
+                    );
+
+                    *index += 1;
+                    is_escape = false;
+                }
+                (true, Char(b')'), _) => {
+                    root_node = Some(
+                        root_node
+                            .map(|t| t.cat(Self::terminal(b')', *index)))
+                            .unwrap_or(Self::terminal(b')', *index)),
                     );
 
                     *index += 1;

@@ -4,91 +4,91 @@ use proc_lexer::build_dfa;
 #[build_dfa]
 #[derive(Debug)]
 pub enum LexToken<'a> {
-    #[regex("break", func = parse_break)]
+    #[regex("break")]
     Break,
-    #[regex("match", func = parse_break)]
+    #[regex("match")]
     Match,
-    #[regex("=>", func = parse_break)]
+    #[regex("=>")]
     FatArrow,
-    #[regex("->", func = parse_break)]
+    #[regex("->")]
     SkinnyArrow,
-    #[regex("if", func = parse_break)]
+    #[regex("if")]
     If,
-    #[regex("else", func = parse_break)]
+    #[regex("else")]
     Else,
-    #[regex("enum", func = parse_break)]
+    #[regex("enum")]
     Enum,
-    #[regex("for", func = parse_break)]
+    #[regex("for")]
     For,
-    #[regex("in", func = parse_break)]
+    #[regex("in")]
     In,
-    #[regex("return", func = parse_break)]
+    #[regex("return")]
     Return,
-    #[regex("type", func = parse_break)]
+    #[regex("type")]
     Type,
-    #[regex("while", func = parse_break)]
+    #[regex("while")]
     While,
-    #[regex("loop", func = parse_break)]
+    #[regex("loop")]
     Loop,
-    #[regex("+", func = parse_break)]
+    #[regex("+")]
     Plus,
-    #[regex("+=", func = parse_break)]
+    #[regex("+=")]
     PlusEq,
-    #[regex("++", func = parse_break)]
+    #[regex("++")]
     PlusPlus,
-    #[regex("-", func = parse_break)]
+    #[regex("-")]
     Minus,
-    #[regex("-=", func = parse_break)]
+    #[regex("-=")]
     MinusEq,
-    #[regex("--", func = parse_break)]
+    #[regex("--")]
     MinusMinus,
-    #[regex("/", func = parse_break)]
+    #[regex("/")]
     Div,
-    #[regex("/=", func = parse_break)]
+    #[regex("/=")]
     DivEq,
-    #[regex("\\*", func = parse_break)]
+    #[regex("\\*")]
     Mult,
-    #[regex("\\*=", func = parse_break)]
+    #[regex("\\*=")]
     MultEq,
-    #[regex("%", func = parse_break)]
+    #[regex("%")]
     Mod,
-    #[regex("%=", func = parse_break)]
+    #[regex("%=")]
     ModEq,
-    #[regex(">", func = parse_break)]
+    #[regex(">")]
     Gt,
-    #[regex("<", func = parse_break)]
+    #[regex("<")]
     Lt,
-    #[regex(">=", func = parse_break)]
+    #[regex(">=")]
     Gte,
-    #[regex("<=", func = parse_break)]
+    #[regex("<=")]
     Lte,
-    #[regex("=", func = parse_break)]
+    #[regex("=")]
     Eq,
-    #[regex("==", func = parse_break)]
+    #[regex("==")]
     EqEq,
-    #[regex("!=", func = parse_break)]
+    #[regex("!=")]
     NotEq,
-    #[regex("&&", func = parse_break)]
+    #[regex("&&")]
     LogAnd,
-    #[regex("\\|\\|", func = parse_break)]
+    #[regex("\\|\\|")]
     LogOr,
-    #[regex("!", func = parse_break)]
+    #[regex("!")]
     LogNot,
-    #[regex("&", func = parse_break)]
+    #[regex("&")]
     BitAnd,
-    #[regex("&=", func = parse_break)]
+    #[regex("&=")]
     BitAndEq,
-    #[regex("\\|", func = parse_break)]
+    #[regex("\\|")]
     BitOr,
-    #[regex("\\|=", func = parse_break)]
+    #[regex("\\|=")]
     BitOrEq,
-    #[regex("~", func = parse_break)]
+    #[regex("~")]
     BitNot,
-    #[regex("^", func = parse_break)]
+    #[regex("^")]
     BitXor,
-    #[regex("^=", func = parse_break)]
+    #[regex("^=")]
     BitXorEq,
-    #[regex("\".*\"", func = parse_break)]
+    #[regex("\".*\"", func = parse_string)]
     String(&'a str),
     #[regex("'.*'", func = parse_char)]
     Char(char),
@@ -98,6 +98,12 @@ pub enum LexToken<'a> {
     Float(&'a str),
     #[regex(".*", func = parse_ident)]
     Ident(&'a str),
+
+    #[regex("\\\\.*\n")]
+    #[regex(" ")]
+    #[regex("\n")]
+    #[regex(";")]
+    Skip,
 }
 
 fn parse_string<'a>(x: &'a str) -> Result<LexToken<'a>> {
@@ -123,10 +129,6 @@ fn parse_char<'a>(x: &'a str) -> Result<LexToken<'a>> {
             .next()
             .ok_or(anyhow::anyhow!("Invalid match"))?,
     ))
-}
-
-fn parse_break<'a>(x: &'a str) -> Result<LexToken<'a>> {
-    Ok(LexToken::Break)
 }
 
 #[derive(Debug)]
