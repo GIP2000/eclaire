@@ -2,17 +2,17 @@ use std::marker::PhantomData;
 
 use anyhow::Result;
 
-pub type ConversionFn<M> = fn(&str) -> Result<M>;
+pub type ConversionFn<'a, M> = fn(&'a str) -> Result<M>;
 
 #[derive(Copy)]
-pub enum TransitionType<M: std::fmt::Debug> {
+pub enum TransitionType<'a, M: std::fmt::Debug> {
     Normal(usize),
     Fail,
-    Accpet(ConversionFn<M>),
-    AccpetOr(usize, ConversionFn<M>),
+    Accpet(ConversionFn<'a, M>),
+    AccpetOr(usize, ConversionFn<'a, M>),
 }
 
-impl<M: std::fmt::Debug> std::fmt::Debug for TransitionType<M> {
+impl<'a, M: std::fmt::Debug> std::fmt::Debug for TransitionType<'a, M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Normal(arg0) => f.debug_tuple("Normal").field(arg0).finish(),
@@ -23,8 +23,8 @@ impl<M: std::fmt::Debug> std::fmt::Debug for TransitionType<M> {
     }
 }
 
-impl<M: std::fmt::Debug> TransitionType<M> {
-    pub fn upgrade(&mut self, f: ConversionFn<M>) {
+impl<'a, M: std::fmt::Debug> TransitionType<'a, M> {
+    pub fn upgrade(&mut self, f: ConversionFn<'a, M>) {
         use TransitionType::*;
 
         match self {
@@ -51,7 +51,7 @@ impl<M: std::fmt::Debug> TransitionType<M> {
     }
 }
 
-impl<M: std::fmt::Debug> Clone for TransitionType<M> {
+impl<'a, M: std::fmt::Debug> Clone for TransitionType<'a, M> {
     fn clone(&self) -> Self {
         match self {
             Self::Normal(arg0) => Self::Normal(arg0.clone()),
@@ -65,7 +65,7 @@ impl<M: std::fmt::Debug> Clone for TransitionType<M> {
 pub struct Lex<'a, M, D>
 where
     M: std::fmt::Debug,
-    D: DFA<M>,
+    D: DFA<'a, M>,
 {
     dfa: &'a D,
     input: &'a str,
@@ -74,7 +74,7 @@ where
     phantom_data: PhantomData<M>,
 }
 
-impl<'a, M: std::fmt::Debug, D: DFA<M>> Lex<'a, M, D> {
+impl<'a, M: std::fmt::Debug, D: DFA<'a, M>> Lex<'a, M, D> {
     pub fn new(dfa: &'a D, input: &'a str, start_pos: usize, has_errored: bool) -> Self {
         Self {
             dfa,
@@ -86,7 +86,7 @@ impl<'a, M: std::fmt::Debug, D: DFA<M>> Lex<'a, M, D> {
     }
 }
 
-impl<'a, M: std::fmt::Debug, D: DFA<M>> Iterator for Lex<'a, M, D> {
+impl<'a, M: std::fmt::Debug, D: DFA<'a, M>> Iterator for Lex<'a, M, D> {
     type Item = anyhow::Result<M>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -108,62 +108,62 @@ impl<'a, M: std::fmt::Debug, D: DFA<M>> Iterator for Lex<'a, M, D> {
 }
 
 #[derive(Debug)]
-pub struct DFAStatic<const S: usize, const I: usize, M: std::fmt::Debug> {
-    pub d_trans: [[TransitionType<M>; I]; S],
+pub struct DFAStatic<'a, const S: usize, const I: usize, M: std::fmt::Debug> {
+    pub d_trans: [[TransitionType<'a, M>; I]; S],
 }
 
-impl<const S: usize, const I: usize, M: std::fmt::Debug> std::ops::Index<(usize, char)>
-    for DFAStatic<S, I, M>
+impl<'a, const S: usize, const I: usize, M: std::fmt::Debug> std::ops::Index<(usize, char)>
+    for DFAStatic<'a, S, I, M>
 {
-    type Output = TransitionType<M>;
+    type Output = TransitionType<'a, M>;
 
     fn index(&self, (i, a): (usize, char)) -> &Self::Output {
         &self.d_trans[i][a as usize]
     }
 }
 
-impl<const S: usize, const I: usize, M: std::fmt::Debug> std::ops::Index<usize>
-    for DFAStatic<S, I, M>
+impl<'a, const S: usize, const I: usize, M: std::fmt::Debug> std::ops::Index<usize>
+    for DFAStatic<'a, S, I, M>
 {
-    type Output = [TransitionType<M>];
+    type Output = [TransitionType<'a, M>];
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.d_trans[index]
     }
 }
 
-impl<const S: usize, const I: usize, M: std::fmt::Debug> std::ops::IndexMut<(usize, char)>
-    for DFAStatic<S, I, M>
+impl<'a, const S: usize, const I: usize, M: std::fmt::Debug> std::ops::IndexMut<(usize, char)>
+    for DFAStatic<'a, S, I, M>
 {
     fn index_mut(&mut self, (i, a): (usize, char)) -> &mut Self::Output {
         &mut self.d_trans[i][a as usize]
     }
 }
 
-impl<const S: usize, const I: usize, M: std::fmt::Debug> std::ops::IndexMut<usize>
-    for DFAStatic<S, I, M>
+impl<'a, const S: usize, const I: usize, M: std::fmt::Debug> std::ops::IndexMut<usize>
+    for DFAStatic<'a, S, I, M>
 {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.d_trans[index]
     }
 }
 
-pub trait DFA<M>
+pub trait DFA<'a, M>
 where
     M: std::fmt::Debug,
     Self: Sized,
 {
     fn states_len(&self) -> usize;
     fn debug_print(&self, letters: &str);
-    fn get_next_lex(&self, input: &str) -> anyhow::Result<(M, usize)>;
-    fn lex<'a>(&'a self, input: &'a str) -> Lex<'a, M, Self> {
+    fn get_next_lex(&self, input: &'a str) -> anyhow::Result<(M, usize)>;
+    fn lex(&'a self, input: &'a str) -> Lex<'a, M, Self> {
         Lex::new(self, input, 0, false)
     }
     fn is_match(&self, input: &str) -> bool;
     fn contains(&self, input: &str) -> bool;
 }
 
-impl<const S: usize, const I: usize, M: std::fmt::Debug> DFA<M> for DFAStatic<S, I, M> {
+impl<'a, const S: usize, const I: usize, M: std::fmt::Debug> DFA<'a, M> for DFAStatic<'a, S, I, M> {
     fn states_len(&self) -> usize {
         self.d_trans.len()
     }
@@ -179,13 +179,13 @@ impl<const S: usize, const I: usize, M: std::fmt::Debug> DFA<M> for DFAStatic<S,
         }
     }
 
-    fn get_next_lex(&self, input: &str) -> anyhow::Result<(M, usize)> {
-        enum ResultState<M> {
+    fn get_next_lex(&self, input: &'a str) -> anyhow::Result<(M, usize)> {
+        enum ResultState<'a, M> {
             Fail,
-            AcceptAt(usize, ConversionFn<M>),
+            AcceptAt(usize, ConversionFn<'a, M>),
         }
 
-        impl<M> std::fmt::Debug for ResultState<M> {
+        impl<'a, M> std::fmt::Debug for ResultState<'a, M> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self {
                     Self::Fail => write!(f, "Fail"),
@@ -194,8 +194,8 @@ impl<const S: usize, const I: usize, M: std::fmt::Debug> DFA<M> for DFAStatic<S,
             }
         }
 
-        impl<M> ResultState<M> {
-            fn upgrade_at_idx(&mut self, new_val: usize, f: ConversionFn<M>) {
+        impl<'a, M> ResultState<'a, M> {
+            fn upgrade_at_idx(&mut self, new_val: usize, f: ConversionFn<'a, M>) {
                 *self = ResultState::AcceptAt(new_val, f);
             }
         }

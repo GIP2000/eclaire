@@ -73,7 +73,7 @@ pub(crate) struct DFABoxed {
     pub(crate) d_trans: Box<[Box<[TransitionType]>]>,
 }
 
-impl DFA<Box<str>> for DFABoxed {
+impl<'a> DFA<'a, Box<str>> for DFABoxed {
     fn states_len(&self) -> usize {
         self.d_trans.len()
     }

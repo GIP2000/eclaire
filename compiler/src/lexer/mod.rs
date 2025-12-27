@@ -90,17 +90,42 @@ pub enum LexToken<'a> {
     BitXorEq,
     #[regex("\".*\"", func = parse_break)]
     String(&'a str),
-    #[regex("'.*'", func = parse_break)]
+    #[regex("'.*'", func = parse_char)]
     Char(char),
-    #[regex("(1|2|3|4|5|6|7|8|9|0)(1|2|3|4|5|6|7|8|9|0)*", func = parse_break)]
-    Int(u64),
-    #[regex("(1|2|3|4|5|6|7|8|9|0)(1|2|3|4|5|6|7|8|9|0)*.(1|2|3|4|5|6|7|8|9|0)(1|2|3|4|5|6|7|8|9|0)*", func = parse_break)]
-    Float(f64),
-    #[regex(".*", func = parse_break)]
+    #[regex("(1|2|3|4|5|6|7|8|9|0)(1|2|3|4|5|6|7|8|9|0)*", func = parse_int)]
+    Int(&'a str),
+    #[regex("(1|2|3|4|5|6|7|8|9|0)(1|2|3|4|5|6|7|8|9|0)*.(1|2|3|4|5|6|7|8|9|0)*", func = parse_float)]
+    Float(&'a str),
+    #[regex(".*", func = parse_ident)]
     Ident(&'a str),
 }
 
-fn parse_break<'a>(x: &str) -> Result<LexToken<'a>> {
+fn parse_string<'a>(x: &'a str) -> Result<LexToken<'a>> {
+    Ok(LexToken::String(&x[1..(x.len() - 1)]))
+}
+
+fn parse_ident<'a>(x: &'a str) -> Result<LexToken<'a>> {
+    Ok(LexToken::Ident(x))
+}
+
+fn parse_int<'a>(x: &'a str) -> Result<LexToken<'a>> {
+    Ok(LexToken::Int(x))
+}
+
+fn parse_float<'a>(x: &'a str) -> Result<LexToken<'a>> {
+    Ok(LexToken::Float(x))
+}
+
+fn parse_char<'a>(x: &'a str) -> Result<LexToken<'a>> {
+    Ok(LexToken::Char(
+        x.chars()
+            .skip(1)
+            .next()
+            .ok_or(anyhow::anyhow!("Invalid match"))?,
+    ))
+}
+
+fn parse_break<'a>(x: &'a str) -> Result<LexToken<'a>> {
     Ok(LexToken::Break)
 }
 
