@@ -1,8 +1,7 @@
 use anyhow::Result;
-use proc_lexer::build_dfa;
+use proc_lexer::Lexer;
 
-#[build_dfa]
-#[derive(Debug)]
+#[derive(Debug, Lexer)]
 pub enum LexToken<'a> {
     #[regex("break")]
     Break,

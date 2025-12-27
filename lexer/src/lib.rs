@@ -2,6 +2,10 @@ use std::marker::PhantomData;
 
 use anyhow::Result;
 
+pub trait Lexer<'a, M: std::fmt::Debug, D: DFA<'a, M>> {
+    fn lex(&'a self, input: &'a str) -> Lex<'a, M, D>;
+}
+
 pub type ConversionFn<'a, M> = fn(&'a str) -> Result<M>;
 
 #[derive(Copy)]

@@ -46,8 +46,8 @@ impl Parse for RegexAttributeArgs {
     }
 }
 
-#[proc_macro_attribute]
-pub fn build_dfa(_att: TokenStream, input: TokenStream) -> TokenStream {
+#[proc_macro_derive(Lexer, attributes(regex))]
+pub fn build_dfa(input: TokenStream) -> TokenStream {
     let mut input_enum = parse_macro_input!(input as DeriveInput);
     let enum_name = &input_enum.ident;
 
@@ -88,6 +88,7 @@ pub fn build_dfa(_att: TokenStream, input: TokenStream) -> TokenStream {
                         }},
                         _ => panic!("Invalid amount of lifetime parameters"),
                     };
+
                     return Some(((regex, name.to_string().into()), Some(func_impl)));
                 }
                 _ => {
@@ -107,10 +108,6 @@ pub fn build_dfa(_att: TokenStream, input: TokenStream) -> TokenStream {
 
     let funcs: Box<_> = funcs.into_iter().filter_map(|x| x).collect();
 
-    data.variants.iter_mut().for_each(|variant| {
-        variant.attrs.retain(|attr| !attr.path().is_ident("regex"));
-    });
-
     let state_count = dfa.states_len();
 
     let d_trans: Box<_> = dfa
@@ -122,7 +119,9 @@ pub fn build_dfa(_att: TokenStream, input: TokenStream) -> TokenStream {
                 .map(|trans| {
                     use dfa::TransitionType::*;
 
-                    let make_ident = |f: &str| syn::Ident::new(f, proc_macro2::Span::call_site());
+                    fn make_ident(f: &str) -> syn::Ident {
+                        syn::Ident::new(f, proc_macro2::Span::call_site())
+                    }
 
                     let result = match trans {
                         Normal(x) => quote! {lexer::TransitionType::Normal(#x)},
@@ -151,14 +150,28 @@ pub fn build_dfa(_att: TokenStream, input: TokenStream) -> TokenStream {
 
     let dfa_name = syn::Ident::new(&format!("{}DFA", enum_name), proc_macro2::Span::call_site());
 
+    let enum_name_for_impl = if *lifetime_count == 1 {
+        quote! {#enum_name<'a>}
+    } else {
+        quote! {#enum_name}
+    };
+
     let result = quote! {
-        #input_enum
+        impl<'a, M: std::fmt::Debug, D: lexer::DFA<'a, M>> lexer::Lexer<'a, M, D> for #enum_name_for_impl {
+            fn lex(&'a self, input: &'a str) -> lexer::Lex<'a, M, D> {
+                __lexer_gen__::#dfa_name.lex()
+            }
+        }
 
-        static #dfa_name: lexer::DFAStatic<#state_count, #DFA_SIZE, #enum_name> = lexer::DFAStatic {
-            d_trans: #arr,
-        };
+        mod __lexer_gen__ {
+            use super::*;
 
-        #(#funcs)*
+            pub static #dfa_name: lexer::DFAStatic<#state_count, #DFA_SIZE, #enum_name> = lexer::DFAStatic {
+                d_trans: #arr,
+            };
+
+            #(#funcs)*
+        }
 
     };
 
