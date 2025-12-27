@@ -1,33 +1,22 @@
+use anyhow::bail;
+use lexer::DFA;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
     ops::{Index, IndexMut},
 };
 
-use anyhow::bail;
+use crate::trie::{TerminalNodeElement, Trie, TrieNode};
 
-use crate::trie::{ConversionFn, TerminalNodeElement, Trie, TrieNode};
-
-#[derive(Copy, PartialEq)]
-pub enum TransitionType<M: Eq + std::fmt::Debug> {
+#[derive(PartialEq)]
+pub enum TransitionType {
     Normal(usize),
     Fail,
-    Accpet(ConversionFn<M>),
-    AccpetOr(usize, ConversionFn<M>),
+    Accpet(Box<str>),
+    AccpetOr(usize, Box<str>),
 }
 
-impl<M: Eq + std::fmt::Debug> Clone for TransitionType<M> {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Normal(arg0) => Self::Normal(arg0.clone()),
-            Self::Fail => Self::Fail,
-            Self::Accpet(arg0) => Self::Accpet(arg0.clone()),
-            Self::AccpetOr(arg0, arg1) => Self::AccpetOr(arg0.clone(), arg1.clone()),
-        }
-    }
-}
-
-impl<M: Eq + std::fmt::Debug> Debug for TransitionType<M> {
+impl std::fmt::Debug for TransitionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Normal(arg0) => f.debug_tuple("Normal").field(arg0).finish(),
@@ -38,8 +27,8 @@ impl<M: Eq + std::fmt::Debug> Debug for TransitionType<M> {
     }
 }
 
-impl<M: Eq + std::fmt::Debug> TransitionType<M> {
-    fn upgrade(&mut self, f: ConversionFn<M>) {
+impl TransitionType {
+    pub fn upgrade(&mut self, f: Box<str>) {
         use TransitionType::*;
 
         match self {
@@ -49,7 +38,7 @@ impl<M: Eq + std::fmt::Debug> TransitionType<M> {
         };
     }
 
-    fn add_value(&mut self, value: usize) {
+    pub fn add_value(&mut self, value: usize) {
         *self = match self {
             TransitionType::Normal(_) | TransitionType::Fail => TransitionType::Normal(value),
             TransitionType::Accpet(f) | TransitionType::AccpetOr(_, f) => {
@@ -58,7 +47,7 @@ impl<M: Eq + std::fmt::Debug> TransitionType<M> {
         }
     }
 
-    fn is_accpet(&self) -> bool {
+    pub fn is_accpet(&self) -> bool {
         match self {
             TransitionType::Normal(_) | TransitionType::Fail => false,
             TransitionType::Accpet(_) | TransitionType::AccpetOr(_, _) => true,
@@ -66,101 +55,32 @@ impl<M: Eq + std::fmt::Debug> TransitionType<M> {
     }
 }
 
-pub struct Lex<'a, M: Eq + std::fmt::Debug> {
-    dfa: &'a DFA<M>,
-    input: &'a str,
-    start_pos: usize,
-    has_errored: bool,
-}
-
-impl<'a, M: Eq + std::fmt::Debug> Iterator for Lex<'a, M> {
-    type Item = anyhow::Result<M>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.has_errored || self.start_pos >= self.input.len() {
-            return None;
+impl Clone for TransitionType {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Normal(arg0) => Self::Normal(arg0.clone()),
+            Self::Fail => Self::Fail,
+            Self::Accpet(arg0) => Self::Accpet(arg0.clone()),
+            Self::AccpetOr(arg0, arg1) => Self::AccpetOr(arg0.clone(), arg1.clone()),
         }
-
-        // TODO: I don't love that it doesn't error if it fails to lexj
-        let (result, new_start) = match self.dfa.get_next_lex(&self.input[self.start_pos..]) {
-            Ok(x) => x,
-            Err(_) => {
-                self.has_errored = true;
-                return Some(Err(anyhow::anyhow!("Failed to lex the next token")));
-            }
-        };
-        self.start_pos += new_start;
-        Some(Ok(result))
     }
 }
 
-const DFA_SIZE: usize = char::MAX as usize + 1;
+pub(crate) const DFA_SIZE: usize = u8::MAX as usize + 1;
 
 #[derive(Debug)]
-pub struct DFA<M: Eq + std::fmt::Debug> {
-    d_trans: Box<[Box<[TransitionType<M>]>]>,
+pub(crate) struct DFABoxed {
+    pub(crate) d_trans: Box<[Box<[TransitionType]>]>,
 }
 
-impl<M: Eq + std::fmt::Debug> Index<(usize, char)> for DFA<M> {
-    type Output = TransitionType<M>;
-
-    fn index(&self, (i, a): (usize, char)) -> &Self::Output {
-        &self.d_trans[i][a as usize]
-    }
-}
-
-impl<M: Eq + std::fmt::Debug> Index<usize> for DFA<M> {
-    type Output = [TransitionType<M>];
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.d_trans[index]
-    }
-}
-
-impl<M: Eq + std::fmt::Debug> IndexMut<(usize, char)> for DFA<M> {
-    fn index_mut(&mut self, (i, a): (usize, char)) -> &mut Self::Output {
-        &mut self.d_trans[i][a as usize]
-    }
-}
-
-impl<M: Eq + std::fmt::Debug> IndexMut<usize> for DFA<M> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.d_trans[index]
-    }
-}
-
-impl<M: Eq + std::fmt::Debug> DFA<M> {
-    pub fn from_regexes(arr: &[(&str, ConversionFn<M>)]) -> anyhow::Result<Self> {
-        let mut iter = arr.iter();
-        let mut size = 0;
-        let mut root = if let Some((regex, accept)) = iter.next() {
-            TrieNode::build_from_regex(regex, accept.clone(), &mut size)?
-        } else {
-            anyhow::bail!("Empty array found");
-        };
-
-        for (regex, accept) in iter {
-            root = TrieNode::or_from_regex(root, regex, accept.clone(), &mut size)?;
-        }
-
-        let follow_pos = root.calculate_follow_pos(size);
-
-        let trie = Trie {
-            root,
-            follow_pos,
-            size,
-        };
-
-        Ok(trie.into())
-    }
-
+impl DFA<Box<str>> for DFABoxed {
     fn states_len(&self) -> usize {
         self.d_trans.len()
     }
 
     fn debug_print(&self, letters: &str) {
         eprintln!("dfa states {:?}\n", self.states_len());
-        let letters: BTreeSet<_> = letters.chars().collect();
+        let letters: BTreeSet<_> = letters.bytes().collect();
         for i in 0..self.states_len() {
             for a in letters.iter() {
                 eprintln!("delta[({}, '{}')] = {:?}", i, a, self[(i, *a)]);
@@ -169,22 +89,13 @@ impl<M: Eq + std::fmt::Debug> DFA<M> {
         }
     }
 
-    fn lex<'a>(&'a self, input: &'a str) -> Lex<'a, M> {
-        Lex {
-            dfa: self,
-            input,
-            start_pos: 0,
-            has_errored: false,
-        }
-    }
-
-    fn get_next_lex(&self, input: &str) -> anyhow::Result<(M, usize)> {
-        enum ResultState<M> {
+    fn get_next_lex(&self, input: &str) -> anyhow::Result<(Box<str>, usize)> {
+        enum ResultState {
             Fail,
-            AcceptAt(usize, ConversionFn<M>),
+            AcceptAt(usize, Box<str>),
         }
 
-        impl<M> Debug for ResultState<M> {
+        impl Debug for ResultState {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self {
                     Self::Fail => write!(f, "Fail"),
@@ -193,8 +104,8 @@ impl<M: Eq + std::fmt::Debug> DFA<M> {
             }
         }
 
-        impl<M> ResultState<M> {
-            fn upgrade_at_idx(&mut self, new_val: usize, f: ConversionFn<M>) {
+        impl ResultState {
+            fn upgrade_at_idx(&mut self, new_val: usize, f: Box<str>) {
                 *self = ResultState::AcceptAt(new_val, f);
             }
         }
@@ -203,7 +114,7 @@ impl<M: Eq + std::fmt::Debug> DFA<M> {
         let mut state = 0;
         let mut result = ResultState::Fail;
 
-        for (input_idx, a) in input.chars().enumerate() {
+        for (input_idx, a) in input.bytes().enumerate() {
             let t = &self[(state, a)];
 
             match t {
@@ -225,15 +136,15 @@ impl<M: Eq + std::fmt::Debug> DFA<M> {
         }
 
         match result {
-            ResultState::AcceptAt(end, f) => f(&input[..end]).map(|x| (x, end)),
+            ResultState::AcceptAt(end, _) => Ok((input[..end].into(), end)),
             ResultState::Fail => bail!("Failed to find a new token"),
         }
     }
 
-    pub fn is_match(&self, input: &str) -> bool {
+    fn is_match(&self, input: &str) -> bool {
         use TransitionType::*;
         let mut state = 0;
-        let mut iter = input.chars();
+        let mut iter = input.bytes();
 
         for a in &mut iter {
             let t = &self[(state, a)];
@@ -243,15 +154,15 @@ impl<M: Eq + std::fmt::Debug> DFA<M> {
             }
         }
 
-        self[(state, '\0')].is_accpet()
+        self[(state, b'\0')].is_accpet()
     }
 
-    pub fn contains(&self, input: &str) -> bool {
+    fn contains(&self, input: &str) -> bool {
         use TransitionType::*;
         let mut state = 0;
 
         'outer: for skip in 0..input.len() {
-            for a in input.chars().skip(skip) {
+            for a in input.bytes().skip(skip) {
                 let t = &self[(state, a)];
                 match t {
                     Normal(i) => state = *i,
@@ -265,8 +176,63 @@ impl<M: Eq + std::fmt::Debug> DFA<M> {
     }
 }
 
-impl<M: Eq + std::fmt::Debug> From<Trie<M>> for DFA<M> {
-    fn from(value: Trie<M>) -> Self {
+impl Index<(usize, u8)> for DFABoxed {
+    type Output = TransitionType;
+
+    fn index(&self, (i, a): (usize, u8)) -> &Self::Output {
+        &self.d_trans[i][a as usize]
+    }
+}
+
+impl Index<usize> for DFABoxed {
+    type Output = [TransitionType];
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.d_trans[index]
+    }
+}
+
+impl IndexMut<(usize, u8)> for DFABoxed {
+    fn index_mut(&mut self, (i, a): (usize, u8)) -> &mut Self::Output {
+        &mut self.d_trans[i][a as usize]
+    }
+}
+
+impl IndexMut<usize> for DFABoxed {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.d_trans[index]
+    }
+}
+
+impl DFABoxed {
+    pub fn from_regexes<I: Iterator<Item = (Box<str>, Box<str>)>>(
+        mut iter: I,
+    ) -> anyhow::Result<Self> {
+        let mut size = 0;
+        let mut root = if let Some((regex, accept)) = iter.next() {
+            TrieNode::build_from_regex(&regex, accept.clone(), &mut size)?
+        } else {
+            anyhow::bail!("Empty array found");
+        };
+
+        for (regex, accept) in iter {
+            root = TrieNode::or_from_regex(root, &regex, accept.clone(), &mut size)?;
+        }
+
+        let follow_pos = root.calculate_follow_pos(size);
+
+        let trie = Trie {
+            root,
+            follow_pos,
+            size,
+        };
+
+        Ok(trie.into())
+    }
+}
+
+impl From<Trie> for DFABoxed {
+    fn from(value: Trie) -> Self {
         #[derive(Debug)]
         struct State {
             elements: BTreeSet<usize>,
@@ -292,7 +258,7 @@ impl<M: Eq + std::fmt::Debug> From<Trie<M>> for DFA<M> {
 
         let refs = value.root.get_refs();
         let mut d_states = vec![State::from_set(first_elements.clone())];
-        let mut d_trans: Vec<Box<[TransitionType<M>]>> = Vec::new();
+        let mut d_trans: Vec<Box<[TransitionType]>> = Vec::new();
 
         let mut i = 0;
         while i < d_states.len() {
@@ -302,7 +268,7 @@ impl<M: Eq + std::fmt::Debug> From<Trie<M>> for DFA<M> {
 
             d_states[i].marked = true;
 
-            let mut map: BTreeMap<TerminalNodeElement<M>, BTreeSet<usize>> = BTreeMap::new();
+            let mut map: BTreeMap<TerminalNodeElement, BTreeSet<usize>> = BTreeMap::new();
             for (input, node) in refs.iter().enumerate().filter_map(|(j, (_, input))| {
                 if !d_states[i].elements.contains(&j) {
                     return None;
@@ -310,7 +276,7 @@ impl<M: Eq + std::fmt::Debug> From<Trie<M>> for DFA<M> {
 
                 let node: BTreeSet<_> = value.follow_pos[j].clone().into_iter().collect();
 
-                Some((*input, node))
+                Some((input.clone(), node))
             }) {
                 if let Some(old_set) = map.get_mut(&input) {
                     old_set.extend(node.into_iter())
@@ -354,7 +320,7 @@ impl<M: Eq + std::fmt::Debug> From<Trie<M>> for DFA<M> {
                         unimplemented!("Need to rethink this")
                     }
                     TerminalNodeElement::Accept(f) => {
-                        d_trans[i].iter_mut().for_each(|x| x.upgrade(f));
+                        d_trans[i].iter_mut().for_each(|x| x.upgrade(f.clone()));
                     }
                 }
             }
@@ -372,60 +338,43 @@ impl<M: Eq + std::fmt::Debug> From<Trie<M>> for DFA<M> {
 mod test {
     use super::*;
 
-    fn to_string(x: &str) -> anyhow::Result<String> {
-        Ok(x.to_string())
-    }
-
-    fn to_uppercase(x: &str) -> anyhow::Result<String> {
-        Ok(x.to_uppercase())
-    }
-
     #[test]
     fn test_lex() {
-        #[derive(Debug, PartialEq, Eq)]
-        enum Tokens {
-            If,
-            Else,
-            Space,
-            String(String),
-        }
-
-        let x: [(&str, ConversionFn<Tokens>); 4] = [
-            ("if", |_| Ok(Tokens::If)),
-            ("else", |_| Ok(Tokens::Else)),
-            (" ", |_| Ok(Tokens::Space)),
+        let x: [(Box<str>, Box<str>); 4] = [
+            ("if".into(), "".into()),
+            ("else".into(), "".into()),
+            (" ".into(), "".into()),
             (
-                "\"(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z| )*\"",
-                |x| Ok(Tokens::String(x[1..x.len() - 1].to_owned())),
+                "\"(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z| )*\"".into(),
+                "".into(),
             ),
         ];
 
-        let combined: DFA<Tokens> = DFA::from_regexes(x.as_slice()).unwrap();
+        let combined: DFABoxed = DFABoxed::from_regexes(x.into_iter()).unwrap();
         let input = "if else \"hi there my name is greg\" if else   \"this is really crazy\" if";
 
-        let mut lex_iter = combined.lex(input).filter_map(|x| {
-            x.ok()
-                .and_then(|x| (!matches!(x, Tokens::Space)).then_some(x))
-        });
+        let mut lex_iter = combined
+            .lex(input)
+            .filter_map(|x| x.ok().and_then(|x| (x != " ".into()).then_some(x)));
 
-        assert_eq!(lex_iter.next().unwrap(), Tokens::If);
-        assert_eq!(lex_iter.next().unwrap(), Tokens::Else);
+        assert_eq!(lex_iter.next().unwrap(), "if".into());
+        assert_eq!(lex_iter.next().unwrap(), "else".into());
         assert_eq!(
             lex_iter.next().unwrap(),
-            Tokens::String("hi there my name is greg".to_owned())
+            "\"hi there my name is greg\"".into()
         );
-        assert_eq!(lex_iter.next().unwrap(), Tokens::If);
-        assert_eq!(lex_iter.next().unwrap(), Tokens::Else);
-        assert_eq!(
-            lex_iter.next().unwrap(),
-            Tokens::String("this is really crazy".to_owned())
-        );
+        assert_eq!(lex_iter.next().unwrap(), "if".into());
+        assert_eq!(lex_iter.next().unwrap(), "else".into());
+        assert_eq!(lex_iter.next().unwrap(), "\"this is really crazy\"".into());
         assert_eq!(lex_iter.next(), None);
     }
 
     #[test]
     fn test_paren() {
-        let dfa: DFA<_> = Trie::from_regex("da*|b", to_uppercase).unwrap().into();
+        let dfa: DFABoxed = Trie::from_regex("da*|b", "to_uppercase".into())
+            .unwrap()
+            .into();
+
         assert!(dfa.is_match("b"));
         assert!(dfa.is_match("d"));
         assert!(dfa.is_match("daaa"));
@@ -434,9 +383,9 @@ mod test {
 
     #[test]
     fn test_string_type() {
-        let trie = Trie::from_regex("c(a|b)*c", to_uppercase).unwrap();
+        let trie = Trie::from_regex("c(a|b)*c", "to_uppercase".into()).unwrap();
         eprintln!("trie: {:?}", trie);
-        let dfa: DFA<_> = trie.into();
+        let dfa: DFABoxed = trie.into();
         dfa.debug_print("cab\0d");
         //
         assert!(dfa.is_match("caaaabbbbc"));
@@ -444,11 +393,13 @@ mod test {
 
     #[test]
     fn test_grab_match() {
-        let dfa: DFA<_> = Trie::from_regex("(a|b)*aab", to_uppercase).unwrap().into();
+        let dfa: DFABoxed = Trie::from_regex("(a|b)*aab", "to_uppercase".into())
+            .unwrap()
+            .into();
         let input = "aaaaaabb";
 
         let result = dfa.get_next_lex(input).unwrap();
-        assert_eq!(result.0, "AAAAAAB");
+        assert_eq!(result.0, "aaaaaab".into());
         assert_eq!(result.1, input.len() - 1);
 
         assert!(matches!(dfa.get_next_lex("caaab"), Err(_)))
@@ -456,8 +407,8 @@ mod test {
 
     #[test]
     fn test_combine() {
-        let x: [(&str, ConversionFn<String>); 2] = [("if", to_string), ("elif", to_uppercase)];
-        let combined: DFA<String> = DFA::from_regexes(x.as_slice()).unwrap();
+        let x: [(Box<str>, Box<str>); 2] = [("if".into(), "".into()), ("elif".into(), "".into())];
+        let combined: DFABoxed = DFABoxed::from_regexes(x.into_iter()).unwrap();
 
         assert!(combined.is_match("elif"));
         assert!(combined.is_match("if"));
@@ -467,7 +418,7 @@ mod test {
 
     #[test]
     fn test_contains() {
-        let dfa: DFA<_> = Trie::from_regex("(a|b)*abb", to_string).unwrap().into();
+        let dfa: DFABoxed = Trie::from_regex("(a|b)*abb", "".into()).unwrap().into();
 
         assert!(dfa.contains("aaaaaaabbaaaaaaa"));
         assert!(dfa.contains("cabb"));
@@ -477,7 +428,7 @@ mod test {
 
     #[test]
     fn test_is_match() {
-        let dfa: DFA<_> = Trie::from_regex("(a|b)*abb", to_string).unwrap().into();
+        let dfa: DFABoxed = Trie::from_regex("(a|b)*abb", "".into()).unwrap().into();
         assert!(dfa.is_match("aaaaaabbbbbbbbbbbbbaaaaaaabb"));
         assert!(!dfa.is_match("aaaaaaabbaaaa"));
         assert!(!dfa.is_match("cabb"));
@@ -487,55 +438,55 @@ mod test {
 
     #[test]
     fn test_a_or_b_star_paren_abb() {
-        let dfa: DFA<_> = Trie::from_regex("(a|b)*abb", to_string).unwrap().into();
+        let dfa: DFABoxed = Trie::from_regex("(a|b)*abb", "".into()).unwrap().into();
 
         use TransitionType::*;
 
         // dfa.debug_print("abc\0");
 
         assert_eq!(dfa.states_len(), 4);
-        assert_eq!(dfa[(0, 'a')], Normal(1));
-        assert_eq!(dfa[(0, 'b')], Normal(0));
-        assert_eq!(dfa[(0, 'c')], Fail);
+        assert_eq!(dfa[(0, b'a')], Normal(1));
+        assert_eq!(dfa[(0, b'b')], Normal(0));
+        assert_eq!(dfa[(0, b'c')], Fail);
 
-        assert_eq!(dfa[(1, 'a')], Normal(1));
-        assert_eq!(dfa[(1, 'b')], Normal(2));
-        assert_eq!(dfa[(1, 'c')], Fail);
+        assert_eq!(dfa[(1, b'a')], Normal(1));
+        assert_eq!(dfa[(1, b'b')], Normal(2));
+        assert_eq!(dfa[(1, b'c')], Fail);
 
-        assert_eq!(dfa[(2, 'a')], Normal(1));
-        assert_eq!(dfa[(2, 'b')], Normal(3));
-        assert_eq!(dfa[(2, 'c')], Fail);
+        assert_eq!(dfa[(2, b'a')], Normal(1));
+        assert_eq!(dfa[(2, b'b')], Normal(3));
+        assert_eq!(dfa[(2, b'c')], Fail);
 
         // assert_eq!(dfa[(3, 'a')], AccpetOr(1));
         assert!(
-            if let AccpetOr(1, _) = dfa[(3, 'a')] {
+            if let AccpetOr(1, _) = dfa[(3, b'a')] {
                 true
             } else {
                 false
             },
             "Failed expected AcceptOr(1) found: {:?}",
-            dfa[(3, 'a')]
+            dfa[(3, b'a')]
         );
         // assert_eq!(dfa[(3, 'b')], AccpetOr(0));
         assert!(
-            if let AccpetOr(0, _) = dfa[(3, 'b')] {
+            if let AccpetOr(0, _) = dfa[(3, b'b')] {
                 true
             } else {
                 false
             },
             "Failed expected AcceptOr(0) found: {:?}",
-            dfa[(3, 'b')]
+            dfa[(3, b'b')]
         );
 
         // assert_eq!(dfa[(3, 'c')], Accpet);
         assert!(
-            if let Accpet(_) = dfa[(3, 'c')] {
+            if let Accpet(_) = dfa[(3, b'c')] {
                 true
             } else {
                 false
             },
             "Failed expected Accept found: {:?}",
-            dfa[(3, 'c')]
+            dfa[(3, b'c')]
         );
     }
 }
