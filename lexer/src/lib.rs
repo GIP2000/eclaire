@@ -1,6 +1,8 @@
 pub mod dfa;
 mod trie;
 
+use std::marker::PhantomData;
+
 use dfa::DFA;
 
 pub trait AcceptFunc
@@ -11,39 +13,44 @@ where
     fn convert<'a>(&self, input: &'a str) -> anyhow::Result<Self::Output<'a>>;
 }
 
-pub trait Lexer<'a, D>
+pub trait Lexer<'a, A, D>
 where
-    D: DFA,
+    A: AcceptFunc + Clone,
+    D: DFA<A>,
 {
-    fn lex<'d>(input: &'a str) -> Lex<'a, 'd, D>;
+    fn lex<'d>(input: &'a str) -> Lex<'a, 'd, A, D>;
 }
 
-pub struct Lex<'a, 'd, D>
+pub struct Lex<'a, 'd, A, D>
 where
-    D: DFA,
+    A: AcceptFunc + Clone,
+    D: DFA<A>,
 {
     dfa: &'d D,
     input: &'a str,
     start_pos: usize,
     has_errored: bool,
+    _phantom_data: std::marker::PhantomData<A>,
 }
 
-impl<'a, 'd, D: DFA> Lex<'a, 'd, D> {
+impl<'a, 'd, A: AcceptFunc + Clone, D: DFA<A>> Lex<'a, 'd, A, D> {
     pub fn new(dfa: &'d D, input: &'a str, start_pos: usize, has_errored: bool) -> Self {
         Self {
             dfa,
             input,
             start_pos,
             has_errored,
+            _phantom_data: PhantomData,
         }
     }
 }
 
-impl<'a, 'd, D> Iterator for Lex<'a, 'd, D>
+impl<'a, 'd, A, D> Iterator for Lex<'a, 'd, A, D>
 where
-    D: DFA,
+    A: AcceptFunc + Clone,
+    D: DFA<A>,
 {
-    type Item = anyhow::Result<D::M<'a>>;
+    type Item = anyhow::Result<A::Output<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.has_errored || self.start_pos >= self.input.len() {

@@ -170,11 +170,11 @@ pub fn build_dfa(input: TokenStream) -> TokenStream {
     let result = quote! {
 
 
-        impl<'a> lexer::Lexer<'a, lexer::dfa::DFAStatic<#state_count, #DFA_SIZE, __lexer_gen__::FnPContainer>> for #enum_name_for_impl {
+        impl<'a> lexer::Lexer<'a, __lexer_gen__::FnPContainer, lexer::dfa::DFAStatic<#state_count, #DFA_SIZE, __lexer_gen__::FnPContainer>> for #enum_name_for_impl {
 
             fn lex<'d>(
                 input: &'a str,
-            ) -> lexer::Lex<'a, 'd, lexer::dfa::DFAStatic<#state_count, #DFA_SIZE, __lexer_gen__::FnPContainer>> {
+            ) -> lexer::Lex<'a, 'd, __lexer_gen__::FnPContainer, lexer::dfa::DFAStatic<#state_count, #DFA_SIZE, __lexer_gen__::FnPContainer>> {
                 use lexer::dfa::DFA;
                 __lexer_gen__::LexTokenDFA.lex(input)
             }
