@@ -95,7 +95,7 @@ pub enum LexToken<'a> {
     Int(&'a str),
     #[regex("[0-9][0-9]*\\.[0-9]*", func = parse_float)]
     Float(&'a str),
-    #[regex(".*", func = parse_ident)]
+    #[regex("[a-zA-Z_][a-zA-Z0-9_]*", func = parse_ident)]
     Ident(&'a str),
 
     #[regex("\\\\.*\n")]
@@ -128,12 +128,4 @@ fn parse_char<'a>(x: &'a str) -> Result<LexToken<'a>> {
             .next()
             .ok_or(anyhow::anyhow!("Invalid match"))?,
     ))
-}
-
-#[derive(Debug)]
-pub struct LexTokenData<'a> {
-    token: LexToken<'a>,
-    line_num: usize,
-    col_num: usize,
-    raw: &'a str,
 }

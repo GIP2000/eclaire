@@ -1,9 +1,9 @@
 extern crate proc_macro;
-mod dfa;
-mod trie;
 
-use dfa::{DFABoxed, DFA_SIZE};
-use lexer::DFA;
+use lexer::{
+    dfa::{DFABoxed, DFA, DFA_SIZE},
+    AcceptFunc,
+};
 use proc_macro::TokenStream;
 
 use quote::quote;
@@ -14,7 +14,18 @@ use syn::{
 
 struct RegexAttributeArgs {
     regex_pattern: Box<str>,
-    func_name: Option<Box<str>>,
+    func_name: Option<BoxStr>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+struct BoxStr(Box<str>);
+
+impl AcceptFunc for BoxStr {
+    type Output<'a> = &'a str;
+
+    fn convert<'a>(&self, input: &'a str) -> anyhow::Result<Self::Output<'a>> {
+        Ok(input)
+    }
 }
 
 impl Parse for RegexAttributeArgs {
@@ -34,7 +45,7 @@ impl Parse for RegexAttributeArgs {
 
                 let func_name: Ident = input.parse()?;
 
-                Some(func_name.to_string().into())
+                Some(BoxStr(func_name.to_string().into()))
             }
             Err(_) => None,
         };
@@ -89,7 +100,7 @@ pub fn build_dfa(input: TokenStream) -> TokenStream {
                         _ => panic!("Invalid amount of lifetime parameters"),
                     };
 
-                    return Some(((regex, name.to_string().into()), Some(func_impl)));
+                    return Some(((regex, BoxStr(name.to_string().into())), Some(func_impl)));
                 }
                 _ => {
                     panic!("#[build_dfa] func required if variant has data");
@@ -99,7 +110,7 @@ pub fn build_dfa(input: TokenStream) -> TokenStream {
     });
     let (regexes, funcs): (Vec<_>, Vec<_>) = regexes.unzip();
 
-    let dfa = match DFABoxed::from_regexes(regexes.into_iter()) {
+    let dfa: DFABoxed<BoxStr> = match DFABoxed::from_regexes(regexes.into_iter()) {
         Ok(x) => x,
         Err(e) => {
             panic!("Failed to compile regexes to dfa: {e:?}");
@@ -117,22 +128,22 @@ pub fn build_dfa(input: TokenStream) -> TokenStream {
             let inner: Box<_> = state
                 .into_iter()
                 .map(|trans| {
-                    use dfa::TransitionType::*;
+                    use lexer::dfa::TransitionType::*;
 
                     fn make_ident(f: &str) -> syn::Ident {
                         syn::Ident::new(f, proc_macro2::Span::call_site())
                     }
 
                     let result = match trans {
-                        Normal(x) => quote! {lexer::TransitionType::Normal(#x)},
-                        Fail => quote! {lexer::TransitionType::Fail},
+                        Normal(x) => quote! {lexer::dfa::TransitionType::Normal(#x)},
+                        Fail => quote! {lexer::dfa::TransitionType::make_fail()},
                         Accpet(f) => {
-                            let f = make_ident(&f.trim());
-                            quote! {lexer::TransitionType::Accpet(#f)}
+                            let f = make_ident(&f.0.trim());
+                            quote! {lexer::dfa::TransitionType::Accpet(FnPContainer(#f))}
                         }
                         AccpetOr(x, f) => {
-                            let f = make_ident(&f.trim());
-                            quote! {lexer::TransitionType::AccpetOr(#x, #f)}
+                            let f = make_ident(&f.0.trim());
+                            quote! {lexer::dfa::TransitionType::AccpetOr(#x, FnPContainer(#f))}
                         }
                     };
 
@@ -157,16 +168,33 @@ pub fn build_dfa(input: TokenStream) -> TokenStream {
     };
 
     let result = quote! {
-        impl<'a, M: std::fmt::Debug, D: lexer::DFA<'a, M>> lexer::Lexer<'a, M, D> for #enum_name_for_impl {
-            fn lex(&'a self, input: &'a str) -> lexer::Lex<'a, M, D> {
-                __lexer_gen__::#dfa_name.lex()
+
+
+        impl<'a> lexer::Lexer<'a, lexer::dfa::DFAStatic<#state_count, #DFA_SIZE, __lexer_gen__::FnPContainer>> for #enum_name_for_impl {
+
+            fn lex<'d>(
+                input: &'a str,
+            ) -> lexer::Lex<'a, 'd, lexer::dfa::DFAStatic<#state_count, #DFA_SIZE, __lexer_gen__::FnPContainer>> {
+                use lexer::dfa::DFA;
+                __lexer_gen__::LexTokenDFA.lex(input)
             }
         }
-
         mod __lexer_gen__ {
             use super::*;
 
-            pub static #dfa_name: lexer::DFAStatic<#state_count, #DFA_SIZE, #enum_name> = lexer::DFAStatic {
+            #[derive(Clone)]
+            pub(crate) struct FnPContainer(for<'a> fn(&'a str) -> anyhow::Result<#enum_name_for_impl>);
+
+            impl lexer::AcceptFunc for FnPContainer {
+                type Output<'a> = #enum_name_for_impl;
+
+                fn convert<'a>(&self, input: &'a str) -> anyhow::Result<Self::Output<'a>> {
+                    self.0(input)
+                }
+            }
+
+
+            pub static #dfa_name: lexer::dfa::DFAStatic<#state_count, #DFA_SIZE, FnPContainer> = lexer::dfa::DFAStatic {
                 d_trans: #arr,
             };
 
