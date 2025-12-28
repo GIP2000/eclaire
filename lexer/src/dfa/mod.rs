@@ -11,14 +11,14 @@ use std::{
 };
 
 #[derive(PartialEq, Clone)]
-pub enum TransitionType<A: Clone + AcceptFunc> {
+pub enum TransitionType<A: AcceptFunc> {
     Normal(usize),
     Fail,
     Accpet(A),
     AccpetOr(usize, A),
 }
 
-impl<A: Clone + AcceptFunc> std::fmt::Debug for TransitionType<A> {
+impl<A: AcceptFunc> std::fmt::Debug for TransitionType<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Normal(arg0) => f.debug_tuple("Normal").field(arg0).finish(),
@@ -29,7 +29,7 @@ impl<A: Clone + AcceptFunc> std::fmt::Debug for TransitionType<A> {
     }
 }
 
-impl<A: Clone + AcceptFunc> TransitionType<A> {
+impl<A: AcceptFunc> TransitionType<A> {
     pub const fn make_fail() -> Self {
         Self::Fail
     }
@@ -64,20 +64,20 @@ impl<A: Clone + AcceptFunc> TransitionType<A> {
 pub const DFA_SIZE: usize = u8::MAX as usize + 1;
 
 #[derive(Debug)]
-pub struct DFABoxed<A: Clone + AcceptFunc> {
+pub struct DFABoxed<A: AcceptFunc> {
     pub d_trans: Box<[Box<[TransitionType<A>]>]>,
 }
 
 impl<A> DFA<A> for DFABoxed<A>
 where
-    A: Clone + AcceptFunc + Debug,
+    A: AcceptFunc + Debug,
 {
     fn states_len(&self) -> usize {
         self.d_trans.len()
     }
 }
 
-impl<A: Clone + AcceptFunc> Index<(usize, u8)> for DFABoxed<A> {
+impl<A: AcceptFunc> Index<(usize, u8)> for DFABoxed<A> {
     type Output = TransitionType<A>;
 
     fn index(&self, (i, a): (usize, u8)) -> &Self::Output {
@@ -85,7 +85,7 @@ impl<A: Clone + AcceptFunc> Index<(usize, u8)> for DFABoxed<A> {
     }
 }
 
-impl<A: Clone + AcceptFunc> Index<usize> for DFABoxed<A> {
+impl<A: AcceptFunc> Index<usize> for DFABoxed<A> {
     type Output = [TransitionType<A>];
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -95,7 +95,7 @@ impl<A: Clone + AcceptFunc> Index<usize> for DFABoxed<A> {
 
 impl<A> IndexMut<(usize, u8)> for DFABoxed<A>
 where
-    A: Clone + AcceptFunc,
+    A: AcceptFunc,
 {
     fn index_mut(&mut self, (i, a): (usize, u8)) -> &mut Self::Output {
         &mut self.d_trans[i][a as usize]
@@ -104,7 +104,7 @@ where
 
 impl<A> IndexMut<usize> for DFABoxed<A>
 where
-    A: Clone + AcceptFunc,
+    A: AcceptFunc,
 {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.d_trans[index]
@@ -113,7 +113,7 @@ where
 
 impl<A> DFABoxed<A>
 where
-    A: Clone + AcceptFunc + Hash + Eq,
+    A: AcceptFunc + Hash + Eq,
 {
     pub fn from_regexes<S: AsRef<str>, I: Iterator<Item = (S, A)>>(
         mut iter: I,
@@ -143,7 +143,7 @@ where
 
 impl<A> From<Trie<A>> for DFABoxed<A>
 where
-    A: Clone + AcceptFunc + Hash + Eq,
+    A: AcceptFunc + Hash + Eq,
 {
     fn from(value: Trie<A>) -> Self {
         #[derive(Debug)]
@@ -250,14 +250,14 @@ where
 #[derive(Debug)]
 pub struct DFAStatic<const S: usize, const I: usize, A>
 where
-    A: AcceptFunc + Clone,
+    A: AcceptFunc,
 {
     pub d_trans: [[TransitionType<A>; I]; S],
 }
 
 impl<const S: usize, const I: usize, A> std::ops::Index<(usize, u8)> for DFAStatic<S, I, A>
 where
-    A: AcceptFunc + Clone,
+    A: AcceptFunc,
 {
     type Output = TransitionType<A>;
 
@@ -268,7 +268,7 @@ where
 
 impl<const S: usize, const I: usize, A> std::ops::Index<usize> for DFAStatic<S, I, A>
 where
-    A: AcceptFunc + Clone,
+    A: AcceptFunc,
 {
     type Output = [TransitionType<A>];
 
@@ -279,7 +279,7 @@ where
 
 impl<const S: usize, const I: usize, A> std::ops::IndexMut<(usize, u8)> for DFAStatic<S, I, A>
 where
-    A: AcceptFunc + Clone,
+    A: AcceptFunc,
 {
     fn index_mut(&mut self, (i, a): (usize, u8)) -> &mut Self::Output {
         &mut self.d_trans[i][a as usize]
@@ -288,7 +288,7 @@ where
 
 impl<const S: usize, const I: usize, A> std::ops::IndexMut<usize> for DFAStatic<S, I, A>
 where
-    A: AcceptFunc + Clone,
+    A: AcceptFunc,
 {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.d_trans[index]
@@ -297,7 +297,7 @@ where
 
 pub trait DFA<A>
 where
-    A: AcceptFunc + Clone,
+    A: AcceptFunc,
     Self: Sized
         + Index<usize, Output = [TransitionType<A>]>
         + Index<(usize, u8), Output = TransitionType<A>>,
@@ -402,7 +402,7 @@ where
 
 impl<const S: usize, const I: usize, A> DFA<A> for DFAStatic<S, I, A>
 where
-    A: AcceptFunc + Clone,
+    A: AcceptFunc,
 {
     fn states_len(&self) -> usize {
         self.d_trans.len()
@@ -450,7 +450,7 @@ mod test {
 
         let mut lex_iter = combined
             .lex(input)
-            .filter_map(|x| x.ok().and_then(|x| (!x.is_empty()).then_some(x)));
+            .filter_map(|x| x.ok().and_then(|(x, _)| (!x.is_empty()).then_some(x)));
 
         assert_eq!(lex_iter.next().unwrap(), "if");
         assert_eq!(lex_iter.next().unwrap(), "else");
@@ -505,7 +505,7 @@ mod test {
 
         let mut lex_iter = combined
             .lex(input)
-            .filter_map(|x| x.ok().and_then(|x| (x != " ").then_some(x)));
+            .filter_map(|x| x.ok().and_then(|(x, _)| (x != " ").then_some(x)));
 
         assert_eq!(lex_iter.next().unwrap(), "=");
         assert_eq!(lex_iter.next().unwrap(), "==");

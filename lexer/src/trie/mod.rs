@@ -50,7 +50,7 @@ impl TrieMeta {
         }
     }
 
-    fn calculate_first_pass_from_char<A: Clone + AcceptFunc>(
+    fn calculate_first_pass_from_char<A: AcceptFunc>(
         c: &TerminalNodeElement<A>,
         index: usize,
     ) -> Self {
@@ -64,13 +64,13 @@ impl TrieMeta {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct Trie<A: Clone + AcceptFunc> {
+pub(crate) struct Trie<A: AcceptFunc> {
     pub(crate) root: TrieNode<A>,
     pub(crate) follow_pos: Vec<HashSet<usize>>,
     pub(crate) size: usize,
 }
 
-impl<A: Clone + AcceptFunc> Trie<A> {
+impl<A: AcceptFunc> Trie<A> {
     pub(crate) fn from_regex(regex: &str, accept: A) -> Result<Self> {
         let mut size = 0;
 
@@ -95,14 +95,14 @@ impl<A: Clone + AcceptFunc> Trie<A> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum TerminalNodeElement<A: Clone + AcceptFunc> {
+pub(crate) enum TerminalNodeElement<A: AcceptFunc> {
     Char(u8),
     Epsilon,
     Accept(A),
 }
 
-impl<A: Clone + AcceptFunc + Eq> Eq for TerminalNodeElement<A> {}
-impl<A: Clone + AcceptFunc + Hash> Hash for TerminalNodeElement<A> {
+impl<A: AcceptFunc + Eq> Eq for TerminalNodeElement<A> {}
+impl<A: AcceptFunc + Hash> Hash for TerminalNodeElement<A> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
             TerminalNodeElement::Char(x) => x.hash(state),
@@ -112,7 +112,7 @@ impl<A: Clone + AcceptFunc + Hash> Hash for TerminalNodeElement<A> {
     }
 }
 
-impl<A: Clone + AcceptFunc> From<TerminalNodeElement<A>> for usize {
+impl<A: AcceptFunc> From<TerminalNodeElement<A>> for usize {
     fn from(value: TerminalNodeElement<A>) -> Self {
         match value {
             TerminalNodeElement::Char(x) => x as usize,
@@ -122,13 +122,13 @@ impl<A: Clone + AcceptFunc> From<TerminalNodeElement<A>> for usize {
     }
 }
 
-impl<A: Clone + AcceptFunc> From<u8> for TerminalNodeElement<A> {
+impl<A: AcceptFunc> From<u8> for TerminalNodeElement<A> {
     fn from(value: u8) -> Self {
         Self::Char(value)
     }
 }
 
-impl<A: Clone + AcceptFunc> TerminalNodeElement<A> {
+impl<A: AcceptFunc> TerminalNodeElement<A> {
     fn is_nullable(&self) -> bool {
         use TerminalNodeElement::*;
         match self {
@@ -141,7 +141,7 @@ impl<A: Clone + AcceptFunc> TerminalNodeElement<A> {
 #[derive(Debug, PartialEq)]
 pub(crate) enum TrieNode<A>
 where
-    A: Clone + AcceptFunc,
+    A: AcceptFunc,
 {
     CatNode(Box<TrieNode<A>>, Box<TrieNode<A>>, TrieMeta),
     StarNode(Box<TrieNode<A>>, TrieMeta),
@@ -149,7 +149,7 @@ where
     TerminalNode(TerminalNodeElement<A>, TrieMeta, usize),
 }
 
-impl<A: Clone + AcceptFunc> TrieNode<A> {
+impl<A: AcceptFunc> TrieNode<A> {
     pub(crate) fn get_meta(&self) -> &TrieMeta {
         use TrieNode::*;
 

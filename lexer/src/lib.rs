@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 use dfa::DFA;
 
-pub trait AcceptFunc
+pub trait AcceptFunc: Clone
 where
     for<'a> Self::Output<'a>: std::fmt::Debug,
 {
@@ -15,7 +15,7 @@ where
 
 pub trait Lexer<'a, A, D>
 where
-    A: AcceptFunc + Clone,
+    A: AcceptFunc,
     D: DFA<A>,
 {
     fn lex<'d>(input: &'a str) -> Lex<'a, 'd, A, D>;
@@ -23,7 +23,7 @@ where
 
 pub struct Lex<'a, 'd, A, D>
 where
-    A: AcceptFunc + Clone,
+    A: AcceptFunc,
     D: DFA<A>,
 {
     dfa: &'d D,
@@ -33,7 +33,7 @@ where
     _phantom_data: std::marker::PhantomData<A>,
 }
 
-impl<'a, 'd, A: AcceptFunc + Clone, D: DFA<A>> Lex<'a, 'd, A, D> {
+impl<'a, 'd, A: AcceptFunc, D: DFA<A>> Lex<'a, 'd, A, D> {
     pub fn new(dfa: &'d D, input: &'a str, start_pos: usize, has_errored: bool) -> Self {
         Self {
             dfa,
@@ -45,12 +45,17 @@ impl<'a, 'd, A: AcceptFunc + Clone, D: DFA<A>> Lex<'a, 'd, A, D> {
     }
 }
 
+pub struct LexerMeta<'a> {
+    pub raw_match: &'a str,
+    pub index: usize,
+}
+
 impl<'a, 'd, A, D> Iterator for Lex<'a, 'd, A, D>
 where
-    A: AcceptFunc + Clone,
+    A: AcceptFunc,
     D: DFA<A>,
 {
-    type Item = anyhow::Result<A::Output<'a>>;
+    type Item = anyhow::Result<(A::Output<'a>, LexerMeta<'a>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.has_errored || self.start_pos >= self.input.len() {
@@ -67,7 +72,14 @@ where
             }
         };
 
+        // TODO: add lineno and colno
+        let meta = LexerMeta {
+            raw_match: &self.input[self.start_pos..(self.start_pos + new_start)],
+            index: self.start_pos,
+        };
+
         self.start_pos += new_start;
-        Some(Ok(result))
+
+        Some(Ok((result, meta)))
     }
 }
