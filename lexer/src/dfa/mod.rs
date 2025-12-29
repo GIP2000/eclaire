@@ -113,7 +113,7 @@ where
 
 impl<A> DFABoxed<A>
 where
-    A: AcceptFunc + Hash + Eq,
+    A: AcceptFunc + Hash + Eq + Ord,
 {
     pub fn from_regexes<S: AsRef<str>, I: Iterator<Item = (S, A)>>(
         mut iter: I,
@@ -143,7 +143,7 @@ where
 
 impl<A> From<Trie<A>> for DFABoxed<A>
 where
-    A: AcceptFunc + Hash + Eq,
+    A: AcceptFunc + Hash + Eq + Ord,
 {
     fn from(value: Trie<A>) -> Self {
         #[derive(Debug)]
@@ -309,7 +309,7 @@ where
         let letters: std::collections::BTreeSet<_> = letters.bytes().collect();
         for i in 0..self.states_len() {
             for a in letters.iter() {
-                eprintln!("delta[({}, '{}')] = {:?}", i, a, self[(i, *a)]);
+                eprintln!("delta[({}, '{}')] = {:?}", i, *a as char, self[(i, *a)]);
             }
             eprint!("\n");
         }
@@ -431,6 +431,14 @@ mod test {
         fn convert<'a>(&self, input: &'a str) -> anyhow::Result<Self::Output<'a>> {
             self(input)
         }
+    }
+
+    #[test]
+    fn test_char() {
+        let dfa: DFABoxed<_> = Trie::from_regex("'[^\n' ]'", bar as F).unwrap().into();
+
+        dfa.debug_print("'\n ^[]abc");
+        assert!(dfa.is_match("'a'"));
     }
 
     #[test]

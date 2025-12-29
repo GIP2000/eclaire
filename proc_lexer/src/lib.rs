@@ -17,7 +17,7 @@ struct RegexAttributeArgs {
     func_name: Option<BoxStr>,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
 struct BoxStr(Box<str>);
 
 impl AcceptFunc for BoxStr {
@@ -32,6 +32,8 @@ impl Parse for RegexAttributeArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let regex_pattern: LitStr = input.parse()?;
         let regex_pattern = regex_pattern.value().into();
+
+        eprintln!("regex_pattern = {}", regex_pattern);
 
         let _comma: syn::Result<syn::token::Comma> = input.parse();
 

@@ -70,7 +70,7 @@ pub(crate) struct Trie<A: AcceptFunc> {
     pub(crate) size: usize,
 }
 
-impl<A: AcceptFunc> Trie<A> {
+impl<A: AcceptFunc + Hash + Eq + Ord> Trie<A> {
     pub(crate) fn from_regex(regex: &str, accept: A) -> Result<Self> {
         let mut size = 0;
 
@@ -94,7 +94,7 @@ impl<A: AcceptFunc> Trie<A> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Ord)]
 pub(crate) enum TerminalNodeElement<A: AcceptFunc> {
     Char(u8),
     Epsilon,
@@ -149,7 +149,7 @@ where
     TerminalNode(TerminalNodeElement<A>, TrieMeta, usize),
 }
 
-impl<A: AcceptFunc> TrieNode<A> {
+impl<A: AcceptFunc + Eq + Hash + Ord> TrieNode<A> {
     pub(crate) fn get_meta(&self) -> &TrieMeta {
         use TrieNode::*;
 
@@ -201,24 +201,59 @@ impl<A: AcceptFunc> TrieNode<A> {
         iter: &mut Peekable<I>,
         index: &mut usize,
     ) -> Result<Self> {
-        let mut root_node: Option<Self> = None;
+        // let mut root_node: Option<Self> = None;
 
         use TerminalNodeElement::*;
 
+        let is_not = iter.peek().is_some_and(|x| matches!(x, Char(b'^')));
+
+        if is_not {
+            iter.next()
+                .ok_or(anyhow!("Unreachable I just peeked and found a ^"))?;
+        }
+
+        let mut letters = std::collections::BTreeSet::new();
+
         while let (Some(next_char), peek) = (iter.next(), iter.peek()) {
             match (next_char, peek) {
-                (Char(b'\\'), Some(Char(b'-')) | Some(Char(b'[')) | Some(Char(b']'))) => {
+                (
+                    Char(b'\\'),
+                    Some(Char(b'^')) | Some(Char(b'-')) | Some(Char(b'[')) | Some(Char(b']')),
+                ) => {
                     // normal with escaped chars
                     let value = iter.next().expect("I checked with the peek");
-                    root_node = Some(
-                        root_node
-                            .map(|t| t.or(Self::terminal(value.clone(), *index)))
-                            .unwrap_or(Self::terminal(value, *index)),
-                    );
-                    *index += 1;
+                    letters.insert(value);
+                    // root_node = Some(
+                    //     root_node
+                    //         .map(|t| t.or(Self::terminal(value.clone(), *index)))
+                    //         .unwrap_or(Self::terminal(value, *index)),
+                    // );
+                    // *index += 1;
                 }
                 (Char(b']'), _) => {
-                    return root_node.ok_or(anyhow!("Error unallowed empty bracket"));
+                    if is_not {
+                        return (0..=u8::MAX)
+                            .filter_map(|x| {
+                                let node = Char(x);
+                                (!letters.contains(&node)).then(|| {
+                                    let result = Self::terminal(node, *index);
+                                    *index += 1;
+                                    result
+                                })
+                            })
+                            .reduce(|acc, val| acc.or(val))
+                            .ok_or(anyhow!("Invalid empty []"));
+                    } else {
+                        return letters
+                            .into_iter()
+                            .map(|x| {
+                                let result = Self::terminal(x, *index);
+                                *index += 1;
+                                result
+                            })
+                            .reduce(|acc, val| acc.or(val))
+                            .ok_or(anyhow!("Invalid empty []"));
+                    }
                 } // end
                 (a, Some(Char(b'-'))) => {
                     let _ = iter.next().expect("I checked with the peek");
@@ -226,32 +261,34 @@ impl<A: AcceptFunc> TrieNode<A> {
                         .next()
                         .ok_or(anyhow!("Error invalid pattern \"a-\" without a 'b'"))?;
 
-                    let (mut a, b) = match (a, b) {
+                    let (a, b) = match (a, b) {
                         (Char(a), Char(b)) => (a, b),
                         _ => bail!("Error: Invalid token on other side of -"),
                     };
 
-                    let mut node = root_node.unwrap_or_else(|| {
-                        let node = Self::terminal(a, *index);
-                        a += 1;
-                        *index += 1;
-                        node
-                    });
+                    letters.extend((a..=b).map(|x| Char(x)));
 
-                    for a in a..=b {
-                        node = node.or(Self::terminal(a, *index));
-                        *index += 1;
-                    }
-
-                    root_node = Some(node);
+                    // let mut node = root_node.unwrap_or_else(|| {
+                    //     let node = Self::terminal(a, *index);
+                    //     a += 1;
+                    //     *index += 1;
+                    //     node
+                    // });
+                    //
+                    // for a in a..=b {
+                    //     node = node.or(Self::terminal(a, *index));
+                    //     *index += 1;
+                    // }
+                    // root_node = Some(node);
                 } // range
                 (value, _) => {
-                    root_node = Some(
-                        root_node
-                            .map(|t| t.or(Self::terminal(value.clone(), *index)))
-                            .unwrap_or(Self::terminal(value, *index)),
-                    );
-                    *index += 1;
+                    letters.insert(value);
+                    // root_node = Some(
+                    //     root_node
+                    //         .map(|t| t.or(Self::terminal(value.clone(), *index)))
+                    //         .unwrap_or(Self::terminal(value, *index)),
+                    // );
+                    // *index += 1;
                 } // normal
             };
         }

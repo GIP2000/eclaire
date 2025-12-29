@@ -45,6 +45,7 @@ impl<'a, 'd, A: AcceptFunc, D: DFA<A>> Lex<'a, 'd, A, D> {
     }
 }
 
+#[derive(Debug)]
 pub struct LexerMeta<'a> {
     pub raw_match: &'a str,
     pub index: usize,
