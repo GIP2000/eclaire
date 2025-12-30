@@ -33,8 +33,6 @@ impl Parse for RegexAttributeArgs {
         let regex_pattern: LitStr = input.parse()?;
         let regex_pattern = regex_pattern.value().into();
 
-        eprintln!("regex_pattern = {}", regex_pattern);
-
         let _comma: syn::Result<syn::token::Comma> = input.parse();
 
         let func_name = match input.parse::<Ident>() {
