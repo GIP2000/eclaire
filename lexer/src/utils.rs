@@ -81,9 +81,10 @@ where
 
 impl<E: Eq> FromIterator<E> for VecSet<E> {
     fn from_iter<T: IntoIterator<Item = E>>(iter: T) -> Self {
-        Self {
-            arr: iter.into_iter().collect(),
-        }
+        let mut x = Self { arr: vec![] };
+        x.extend(iter.into_iter());
+
+        x
     }
 }
 

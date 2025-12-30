@@ -371,11 +371,11 @@ where
         let mut result = ResultState::Fail;
 
         for (input_idx, a) in input.bytes().chain(std::iter::once(b'\0')).enumerate() {
-            let print = if (b'a'..=b'z').contains(&a) {
-                &(a as char) as &dyn std::fmt::Debug
-            } else {
-                &a as &dyn std::fmt::Debug
-            };
+            // let print = if a.is_ascii_alphanumeric() {
+            //     &(a as char) as &dyn std::fmt::Debug
+            // } else {
+            //     &a as &dyn std::fmt::Debug
+            // };
 
             let t = &self[(state, a)];
 
@@ -397,12 +397,10 @@ where
             }
         }
 
-        let result = match result {
+        match result {
             ResultState::AcceptAt(end, f) => f.convert(&input[..end]).map(|x| (x, end)),
             ResultState::Fail => bail!("Failed to find a new token"),
-        };
-
-        result
+        }
     }
 
     fn lex<'d, 'a>(&'d self, input: &'a str) -> Lex<'a, 'd, A, Self> {
