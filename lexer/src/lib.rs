@@ -1,5 +1,6 @@
 pub mod dfa;
 mod trie;
+mod utils;
 
 use std::marker::PhantomData;
 
@@ -31,6 +32,22 @@ where
     start_pos: usize,
     has_errored: bool,
     _phantom_data: std::marker::PhantomData<A>,
+}
+
+impl<'a, 'd, A, D> Clone for Lex<'a, 'd, A, D>
+where
+    A: AcceptFunc,
+    D: DFA<A>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            dfa: self.dfa,
+            input: self.input,
+            start_pos: self.start_pos.clone(),
+            has_errored: self.has_errored.clone(),
+            _phantom_data: PhantomData,
+        }
+    }
 }
 
 impl<'a, 'd, A: AcceptFunc, D: DFA<A>> Lex<'a, 'd, A, D> {

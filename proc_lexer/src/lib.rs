@@ -184,8 +184,13 @@ pub fn build_dfa(input: TokenStream) -> TokenStream {
         mod __lexer_gen__ {
             use super::*;
 
+            pub(crate) type DFAType = lexer::dfa::DFAStatic<#state_count, #DFA_SIZE, FnPContainer>;
+
+            pub(crate) type LexerType<'a> = lexer::Lex<'a, 'static, __lexer_gen__::FnPContainer, DFAType>;
+
+
             #[derive(Clone)]
-            pub(crate) struct FnPContainer(for<'a> fn(&'a str) -> anyhow::Result<#enum_name_for_impl>);
+            pub struct FnPContainer(for<'a> fn(&'a str) -> anyhow::Result<#enum_name_for_impl>);
 
             impl lexer::AcceptFunc for FnPContainer {
                 type Output<'a> = #enum_name_for_impl;
@@ -196,7 +201,7 @@ pub fn build_dfa(input: TokenStream) -> TokenStream {
             }
 
 
-            pub static #dfa_name: lexer::dfa::DFAStatic<#state_count, #DFA_SIZE, FnPContainer> = lexer::dfa::DFAStatic {
+            pub static #dfa_name: DFAType = lexer::dfa::DFAStatic {
                 d_trans: #arr,
             };
 

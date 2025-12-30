@@ -1,12 +1,12 @@
 use crate::{
     trie::{TerminalNodeElement, Trie, TrieNode},
+    utils::{VecMap, VecSet},
     AcceptFunc, Lex,
 };
 use anyhow::bail;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt::Debug,
-    hash::Hash,
     ops::{Index, IndexMut},
 };
 
@@ -40,16 +40,16 @@ impl<A: AcceptFunc> TransitionType<A> {
         match self {
             Normal(x) => *self = AccpetOr(*x, f),
             Fail => *self = Accpet(f),
-            _ => {}
+            Accpet(_) => unreachable!("accpet upgrade conflict"),
+            AccpetOr(_, _) => unreachable!("accept upgrade conflict"),
         };
     }
 
     pub fn add_value(&mut self, value: usize) {
         *self = match self {
-            TransitionType::Normal(_) | TransitionType::Fail => TransitionType::Normal(value),
-            TransitionType::Accpet(f) | TransitionType::AccpetOr(_, f) => {
-                TransitionType::AccpetOr(value, f.clone())
-            }
+            TransitionType::Fail => TransitionType::Normal(value),
+            TransitionType::Accpet(f) => TransitionType::AccpetOr(value, f.clone()),
+            _ => unreachable!("This should never happen we have a conflict"),
         }
     }
 
@@ -113,20 +113,21 @@ where
 
 impl<A> DFABoxed<A>
 where
-    A: AcceptFunc + Hash + Eq + Ord,
+    A: AcceptFunc + Eq,
 {
     pub fn from_regexes<S: AsRef<str>, I: Iterator<Item = (S, A)>>(
         mut iter: I,
     ) -> anyhow::Result<Self> {
         let mut size = 0;
         let mut root = if let Some((regex, accept)) = iter.next() {
-            TrieNode::build_from_regex(regex.as_ref(), accept.clone(), &mut size)?
+            TrieNode::build_from_regex(regex.as_ref(), accept.clone(), &mut size, 0)?
         } else {
             anyhow::bail!("Empty array found");
         };
 
-        for (regex, accept) in iter {
-            root = TrieNode::or_from_regex(root, regex.as_ref(), accept.clone(), &mut size)?;
+        for (rank, (regex, accept)) in iter.enumerate() {
+            root =
+                TrieNode::or_from_regex(root, regex.as_ref(), accept.clone(), &mut size, rank + 1)?;
         }
 
         let follow_pos = root.calculate_follow_pos(size);
@@ -143,17 +144,17 @@ where
 
 impl<A> From<Trie<A>> for DFABoxed<A>
 where
-    A: AcceptFunc + Hash + Eq + Ord,
+    A: AcceptFunc + Eq,
 {
     fn from(value: Trie<A>) -> Self {
         #[derive(Debug)]
         struct State {
-            elements: HashSet<usize>,
+            elements: VecSet<usize>,
             marked: bool,
         }
 
         impl State {
-            pub fn from_set(elements: HashSet<usize>) -> Self {
+            pub fn from_set(elements: VecSet<usize>) -> Self {
                 Self {
                     elements,
                     marked: false,
@@ -161,7 +162,7 @@ where
             }
         }
 
-        let first_elements: HashSet<_> = value
+        let first_elements: VecSet<_> = value
             .root
             .get_meta()
             .first_pos
@@ -173,6 +174,8 @@ where
         let mut d_states = vec![State::from_set(first_elements.clone())];
         let mut d_trans: Vec<Box<[TransitionType<A>]>> = Vec::new();
 
+        let mut rank_map: HashMap<(usize, usize), usize> = HashMap::new();
+
         let mut i = 0;
         while i < d_states.len() {
             if d_states[i].marked {
@@ -181,13 +184,13 @@ where
 
             d_states[i].marked = true;
 
-            let mut map: HashMap<TerminalNodeElement<A>, HashSet<usize>> = HashMap::new();
+            let mut map: VecMap<TerminalNodeElement<A>, VecSet<usize>> = VecMap::new();
             for (input, node) in refs.iter().enumerate().filter_map(|(j, (_, input))| {
                 if !d_states[i].elements.contains(&j) {
                     return None;
                 }
 
-                let node: HashSet<_> = value.follow_pos[j].clone().into_iter().collect();
+                let node: VecSet<_> = value.follow_pos[j].clone().into_iter().collect();
 
                 Some((input.clone(), node))
             }) {
@@ -209,10 +212,6 @@ where
                     });
 
                 if d_trans.len() <= i {
-                    // assert that
-                    // sizeof usize > sizeof char
-                    assert!(usize::MAX > char::MAX as usize);
-
                     d_trans.extend(vec![
                         vec![
                             TransitionType::make_fail();
@@ -232,8 +231,18 @@ where
                     TerminalNodeElement::Epsilon => {
                         unimplemented!("Need to rethink this")
                     }
-                    TerminalNodeElement::Accept(f) => {
-                        d_trans[i].iter_mut().for_each(|x| x.upgrade(f.clone()));
+                    TerminalNodeElement::Accept(f, current_rank) => {
+                        d_trans[i].iter_mut().enumerate().for_each(|(a, x)| {
+                            let old_rank = rank_map.get(&(i, a));
+
+                            match old_rank {
+                                Some(old) if *old > current_rank => x.upgrade(f.clone()),
+                                None => x.upgrade(f.clone()),
+                                _ => {}
+                            }
+
+                            rank_map.insert((i, a), current_rank);
+                        });
                     }
                 }
             }
@@ -304,12 +313,39 @@ where
     for<'a> A::Output<'a>: std::fmt::Debug,
 {
     fn states_len(&self) -> usize;
+
+    fn debug_print2(&self, letters: &str, print_override: impl Fn(&TransitionType<A>) -> String) {
+        eprintln!("dfa states {:?}\n", self.states_len());
+        let letters: std::collections::BTreeSet<_> = letters.bytes().collect();
+        for i in 0..self.states_len() {
+            for a in letters.iter() {
+                let print = if (b'a'..=b'z').contains(&a) {
+                    &(*a as char) as &dyn std::fmt::Debug
+                } else {
+                    &a as &dyn std::fmt::Debug
+                };
+                eprintln!(
+                    "delta[({}, {:?})] = {:?}",
+                    i,
+                    print,
+                    print_override(&self[(i, *a)])
+                );
+            }
+            eprint!("\n");
+        }
+    }
+
     fn debug_print(&self, letters: &str) {
         eprintln!("dfa states {:?}\n", self.states_len());
         let letters: std::collections::BTreeSet<_> = letters.bytes().collect();
         for i in 0..self.states_len() {
             for a in letters.iter() {
-                eprintln!("delta[({}, '{}')] = {:?}", i, *a as char, self[(i, *a)]);
+                let print = if (b'a'..=b'z').contains(&a) {
+                    &(*a as char) as &dyn std::fmt::Debug
+                } else {
+                    &a as &dyn std::fmt::Debug
+                };
+                eprintln!("delta[({}, {:?})] = {:?}", i, print, self[(i, *a)]);
             }
             eprint!("\n");
         }
@@ -335,6 +371,12 @@ where
         let mut result = ResultState::Fail;
 
         for (input_idx, a) in input.bytes().chain(std::iter::once(b'\0')).enumerate() {
+            let print = if (b'a'..=b'z').contains(&a) {
+                &(a as char) as &dyn std::fmt::Debug
+            } else {
+                &a as &dyn std::fmt::Debug
+            };
+
             let t = &self[(state, a)];
 
             match t {
@@ -355,10 +397,12 @@ where
             }
         }
 
-        match result {
+        let result = match result {
             ResultState::AcceptAt(end, f) => f.convert(&input[..end]).map(|x| (x, end)),
             ResultState::Fail => bail!("Failed to find a new token"),
-        }
+        };
+
+        result
     }
 
     fn lex<'d, 'a>(&'d self, input: &'a str) -> Lex<'a, 'd, A, Self> {
@@ -442,6 +486,65 @@ mod test {
     }
 
     #[test]
+    fn test_ident_plus_fn() {
+        #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone)]
+        enum Tokens {
+            Fn,
+            Ident,
+            Skip,
+        }
+
+        type F = for<'a> fn(&'a str) -> Result<Tokens>;
+
+        #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+        struct FnContainer(F, &'static str);
+
+        impl AcceptFunc for FnContainer {
+            type Output<'a> = Tokens;
+
+            fn convert<'a>(&self, input: &'a str) -> anyhow::Result<Self::Output<'a>> {
+                self.0(input)
+            }
+        }
+
+        use Tokens::*;
+
+        fn parse_fn<'a>(_: &'a str) -> Result<Tokens> {
+            Ok(Fn)
+        }
+        fn parse_ident(_: &str) -> Result<Tokens> {
+            Ok(Ident)
+        }
+        fn parse_skip(_: &str) -> Result<Tokens> {
+            Ok(Skip)
+        }
+
+        let x: [(&str, FnContainer); 3] = [
+            ("fn", FnContainer(parse_fn, "fn")),
+            ("[a-zA-Z][a-zA-Z0-9_]*", FnContainer(parse_ident, "ident")),
+            ("[ \n]", FnContainer(parse_skip, "skip")),
+        ];
+        let dfa: DFABoxed<_> = DFABoxed::from_regexes(x.into_iter()).unwrap();
+
+        dfa.debug_print2("fn fnap  \0", |x| match x {
+            TransitionType::Accpet(y) => format!("Accept({:?})", y.1),
+            TransitionType::AccpetOr(x, y) => format!("AcceptOr({:?}, {:?})", x, y.1),
+            x => format!("{:?}", x),
+        });
+
+        let mut lex = dfa.lex("fn clap fn").filter_map(|x| match x {
+            Ok((Skip, _)) => None,
+            Ok((x, _)) => Some(Ok(x)),
+            Err(er) => Some(Err(er)),
+        });
+
+        assert_eq!(lex.next().unwrap().unwrap(), Fn);
+        assert_eq!(lex.next().unwrap().unwrap(), Ident);
+        assert_eq!(lex.next().unwrap().unwrap(), Fn);
+        assert!(lex.next().is_none());
+    }
+
+    #[test]
     fn test_lex() {
         let x: [(Box<str>, F); 4] = [
             ("if".into(), bar),
@@ -483,7 +586,6 @@ mod test {
     #[test]
     fn test_string_type() {
         let trie = Trie::from_regex("c(a|b)*c", "to_uppercase").unwrap();
-        eprintln!("trie: {:?}", trie);
         let dfa: DFABoxed<_> = trie.into();
         dfa.debug_print("cab\0d");
         //

@@ -1,17 +1,14 @@
+use crate::utils::VecSet;
 use anyhow::{anyhow, bail, Result};
-use std::{
-    collections::{HashSet, VecDeque},
-    hash::Hash,
-    iter::Peekable,
-};
+use std::{collections::VecDeque, fmt::Debug, iter::Peekable};
 
 use crate::{dfa::DFA_SIZE, AcceptFunc};
 
 #[derive(Debug, Default, PartialEq, Clone)]
 pub(crate) struct TrieMeta {
     pub(crate) nullable: bool,
-    pub(crate) first_pos: HashSet<usize>,
-    pub(crate) last_pos: HashSet<usize>,
+    pub(crate) first_pos: VecSet<usize>,
+    pub(crate) last_pos: VecSet<usize>,
 }
 
 impl TrieMeta {
@@ -54,7 +51,7 @@ impl TrieMeta {
         c: &TerminalNodeElement<A>,
         index: usize,
     ) -> Self {
-        let set = HashSet::from([index]);
+        let set = VecSet::from([index]);
         Self {
             nullable: c.is_nullable(),
             first_pos: set.clone(),
@@ -63,14 +60,24 @@ impl TrieMeta {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub(crate) struct Trie<A: AcceptFunc> {
     pub(crate) root: TrieNode<A>,
-    pub(crate) follow_pos: Vec<HashSet<usize>>,
+    pub(crate) follow_pos: Vec<VecSet<usize>>,
     pub(crate) size: usize,
 }
 
-impl<A: AcceptFunc + Hash + Eq + Ord> Trie<A> {
+impl<A: AcceptFunc> std::fmt::Debug for Trie<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Trie")
+            .field("root", &self.root)
+            .field("follow_pos", &self.follow_pos)
+            .field("size", &self.size)
+            .finish()
+    }
+}
+
+impl<A: AcceptFunc + Eq> Trie<A> {
     pub(crate) fn from_regex(regex: &str, accept: A) -> Result<Self> {
         let mut size = 0;
 
@@ -78,7 +85,7 @@ impl<A: AcceptFunc + Hash + Eq + Ord> Trie<A> {
             TrieNode::from_iterator(&mut regex.bytes().map(|x| x.into()).peekable(), &mut size)?
                 // Add the accept state to the end
                 .cat(TrieNode::terminal(
-                    TerminalNodeElement::Accept(accept),
+                    TerminalNodeElement::Accept(accept, 0),
                     size,
                 ));
         // increment the size to accomidate the accept state
@@ -94,20 +101,27 @@ impl<A: AcceptFunc + Hash + Eq + Ord> Trie<A> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum TerminalNodeElement<A: AcceptFunc> {
     Char(u8),
     Epsilon,
-    Accept(A),
+    Accept(A, usize),
 }
 
-impl<A: AcceptFunc + Eq> Eq for TerminalNodeElement<A> {}
-impl<A: AcceptFunc + Hash> Hash for TerminalNodeElement<A> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl<A: AcceptFunc> Debug for TerminalNodeElement<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TerminalNodeElement::Char(x) => x.hash(state),
-            TerminalNodeElement::Epsilon => core::mem::discriminant(self).hash(state),
-            TerminalNodeElement::Accept(f) => f.hash(state),
+            Self::Char(arg0) => {
+                let readable = if arg0.is_ascii_alphanumeric() {
+                    &(*arg0 as char) as &dyn std::fmt::Debug
+                } else {
+                    arg0 as &dyn std::fmt::Debug
+                };
+
+                f.debug_tuple("Char").field(readable).finish()
+            }
+            Self::Epsilon => write!(f, "Epsilon"),
+            Self::Accept(_, rank) => f.debug_tuple("Char").field(rank).finish(),
         }
     }
 }
@@ -117,7 +131,7 @@ impl<A: AcceptFunc> From<TerminalNodeElement<A>> for usize {
         match value {
             TerminalNodeElement::Char(x) => x as usize,
             TerminalNodeElement::Epsilon => unimplemented!("Think through epsilon more"),
-            TerminalNodeElement::Accept(_) => char::MAX as usize + 1,
+            TerminalNodeElement::Accept(_, _) => char::MAX as usize + 1,
         }
     }
 }
@@ -132,13 +146,13 @@ impl<A: AcceptFunc> TerminalNodeElement<A> {
     fn is_nullable(&self) -> bool {
         use TerminalNodeElement::*;
         match self {
-            Char(_) | Accept(_) => false,
+            Char(_) | Accept(_, _) => false,
             Epsilon => true,
         }
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub(crate) enum TrieNode<A>
 where
     A: AcceptFunc,
@@ -149,7 +163,35 @@ where
     TerminalNode(TerminalNodeElement<A>, TrieMeta, usize),
 }
 
-impl<A: AcceptFunc + Eq + Hash + Ord> TrieNode<A> {
+impl<A: AcceptFunc> Debug for TrieNode<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CatNode(arg0, arg1, arg2) => f
+                .debug_tuple("CatNode")
+                .field(arg0)
+                .field(arg1)
+                .field(arg2)
+                .finish(),
+            Self::StarNode(arg0, arg1) => {
+                f.debug_tuple("StarNode").field(arg0).field(arg1).finish()
+            }
+            Self::OrNode(arg0, arg1, arg2) => f
+                .debug_tuple("OrNode")
+                .field(arg0)
+                .field(arg1)
+                .field(arg2)
+                .finish(),
+            Self::TerminalNode(arg0, arg1, arg2) => f
+                .debug_tuple("TerminalNode")
+                .field(arg0)
+                .field(arg1)
+                .field(arg2)
+                .finish(),
+        }
+    }
+}
+
+impl<A: AcceptFunc + Eq> TrieNode<A> {
     pub(crate) fn get_meta(&self) -> &TrieMeta {
         use TrieNode::*;
 
@@ -179,10 +221,15 @@ impl<A: AcceptFunc + Eq + Hash + Ord> TrieNode<A> {
         Self::TerminalNode(c, meta, index)
     }
 
-    pub(crate) fn build_from_regex(regex: &str, accept: A, index: &mut usize) -> Result<Self> {
+    pub(crate) fn build_from_regex(
+        regex: &str,
+        accept: A,
+        index: &mut usize,
+        rank: usize,
+    ) -> Result<Self> {
         let t =
             TrieNode::from_iterator(&mut regex.bytes().map(|x| x.into()).peekable(), index)?.cat(
-                TrieNode::terminal(TerminalNodeElement::Accept(accept.clone()), *index),
+                TrieNode::terminal(TerminalNodeElement::Accept(accept.clone(), rank), *index),
             );
         *index += 1;
         Ok(t)
@@ -193,8 +240,9 @@ impl<A: AcceptFunc + Eq + Hash + Ord> TrieNode<A> {
         regex: &str,
         accept: A,
         index: &mut usize,
+        rank: usize,
     ) -> Result<Self> {
-        Ok(prev.or(Self::build_from_regex(regex, accept, index)?))
+        Ok(prev.or(Self::build_from_regex(regex, accept, index, rank)?))
     }
 
     fn handle_bracket<I: Iterator<Item = TerminalNodeElement<A>>>(
@@ -212,7 +260,7 @@ impl<A: AcceptFunc + Eq + Hash + Ord> TrieNode<A> {
                 .ok_or(anyhow!("Unreachable I just peeked and found a ^"))?;
         }
 
-        let mut letters = std::collections::BTreeSet::new();
+        let mut letters = VecSet::new();
 
         while let (Some(next_char), peek) = (iter.next(), iter.peek()) {
             match (next_char, peek) {
@@ -480,9 +528,9 @@ impl<A: AcceptFunc + Eq + Hash + Ord> TrieNode<A> {
         result
     }
 
-    pub(crate) fn calculate_follow_pos(&self, size: usize) -> Vec<HashSet<usize>> {
+    pub(crate) fn calculate_follow_pos(&self, size: usize) -> Vec<VecSet<usize>> {
         let mut stack = vec![self];
-        let mut follow_pos = vec![HashSet::new(); size];
+        let mut follow_pos = vec![VecSet::new(); size];
 
         while let Some(current_ref) = stack.pop() {
             use TrieNode::*;
@@ -561,7 +609,7 @@ mod test {
             )
             .cat(TrieNode::terminal(b'c', 3))
             .cat(TrieNode::terminal(
-                TerminalNodeElement::Accept("to_string"),
+                TerminalNodeElement::Accept("to_string", 0),
                 4,
             ));
 
@@ -569,11 +617,11 @@ mod test {
 
         assert_eq!(
             vec![
-                HashSet::from([1, 2, 3]),
-                HashSet::from([1, 2, 3]),
-                HashSet::from([1, 2, 3]),
-                HashSet::from([4]),
-                HashSet::from([]),
+                VecSet::from([1, 2, 3]),
+                VecSet::from([1, 2, 3]),
+                VecSet::from([1, 2, 3]),
+                VecSet::from([4]),
+                VecSet::from([]),
             ],
             attempt.follow_pos
         );
@@ -590,7 +638,7 @@ mod test {
             .cat(TrieNode::terminal(b'a', 3))
             .cat(TrieNode::terminal(b'b', 4))
             .cat(TrieNode::terminal(
-                TerminalNodeElement::Accept("to_string"),
+                TerminalNodeElement::Accept("to_string", 0),
                 5,
             ));
 
@@ -599,12 +647,12 @@ mod test {
         assert_eq!(
             attempt.follow_pos,
             vec![
-                HashSet::from([0, 1, 2]),
-                HashSet::from([0, 1, 2]),
-                HashSet::from([3]),
-                HashSet::from([4]),
-                HashSet::from([5]),
-                HashSet::from([])
+                VecSet::from([0, 1, 2]),
+                VecSet::from([0, 1, 2]),
+                VecSet::from([3]),
+                VecSet::from([4]),
+                VecSet::from([5]),
+                VecSet::from([])
             ]
         );
     }
@@ -621,7 +669,7 @@ mod test {
                 .cat(TrieNode::terminal(b'a', 3))
                 .cat(TrieNode::terminal(b'b', 4)))
             .cat(TrieNode::terminal(
-                TerminalNodeElement::Accept("to_string".into()),
+                TerminalNodeElement::Accept("to_string".into(), 0),
                 5,
             ));
 
@@ -630,12 +678,12 @@ mod test {
         assert_eq!(
             attempt.follow_pos,
             vec![
-                HashSet::from([5]),
-                HashSet::from([1, 2]),
-                HashSet::from([3]),
-                HashSet::from([4]),
-                HashSet::from([5]),
-                HashSet::from([])
+                VecSet::from([5]),
+                VecSet::from([1, 2]),
+                VecSet::from([3]),
+                VecSet::from([4]),
+                VecSet::from([5]),
+                VecSet::from([])
             ]
         );
     }
@@ -648,7 +696,7 @@ mod test {
         let correct = TrieNode::terminal(b'a', 0)
             .or(TrieNode::terminal(b'b', 1).star())
             .cat(TrieNode::terminal(
-                TerminalNodeElement::Accept("to_string".into()),
+                TerminalNodeElement::Accept("to_string".into(), 0),
                 2,
             ));
 
@@ -656,7 +704,7 @@ mod test {
 
         assert_eq!(
             attempt.follow_pos,
-            vec![HashSet::from([2]), HashSet::from([1, 2]), HashSet::from([]),]
+            vec![VecSet::from([2]), VecSet::from([1, 2]), VecSet::from([]),]
         );
     }
 
@@ -668,7 +716,7 @@ mod test {
         let correct = TrieNode::terminal(b'|', 0)
             .cat(TrieNode::terminal(b'|', 1))
             .cat(TrieNode::terminal(
-                TerminalNodeElement::Accept("to_string"),
+                TerminalNodeElement::Accept("to_string", 0),
                 2,
             ));
 
@@ -684,7 +732,7 @@ mod test {
             .or(TrieNode::terminal(b'c', 2))
             .or(TrieNode::terminal(b'd', 3))
             .cat(TrieNode::terminal(
-                TerminalNodeElement::Accept("to_string"),
+                TerminalNodeElement::Accept("to_string", 0),
                 4,
             ));
         assert_eq!(correct, attempt.root);
@@ -700,7 +748,7 @@ mod test {
             .or(TrieNode::terminal(b'd', 3))
             .star()
             .cat(TrieNode::terminal(
-                TerminalNodeElement::Accept("to_string"),
+                TerminalNodeElement::Accept("to_string", 0),
                 4,
             ));
         assert_eq!(correct, attempt.root);
@@ -711,7 +759,7 @@ mod test {
         let attempt = Trie::from_regex("\\*", "to_string").unwrap();
 
         let correct = TrieNode::terminal(b'*', 0).cat(TrieNode::terminal(
-            TerminalNodeElement::Accept("to_string"),
+            TerminalNodeElement::Accept("to_string", 0),
             1,
         ));
 

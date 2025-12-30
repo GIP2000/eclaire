@@ -40,8 +40,18 @@ fn main() -> anyhow::Result<()> {
     reader.read_to_string(&mut source_code)?;
 
     let source_code = source_code.into_boxed_str();
+    eprintln!("source code = {:?}", source_code);
 
-    parse(&source_code)?;
 
-    Ok(())
+
+    match parse(&source_code) {
+        Ok(_) => {
+            println!("good job");
+            Ok(())
+        }
+        Err(x) => {
+            println!("bad job");
+            Err(anyhow::anyhow!("Error couldn't make program: {:?}", x))
+        }
+    }
 }
