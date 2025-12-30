@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod test;
+
 use crate::lexer::{LexToken, LexerIterator};
 
 use thiserror::Error;
@@ -30,27 +33,37 @@ impl<T> FromParseResultTrait<T> for anyhow::Result<T> {
     }
 }
 
+impl<T> FromParseResultTrait<T> for Result<T> {
+    fn to_entry(self) -> Result<T> {
+        self.map_err(|_| ParserError::EntryError)
+    }
+}
+
 fn parse_translation_unit<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
+    let mut first = true;
     loop {
-        match parse_function(lexer) {
-            x @ Err(ParserError::MiddleError) => {
-                eprintln!("I was in middle");
+        match (first, parse_function(lexer)) {
+            (_, x @ Err(ParserError::MiddleError)) | (true, x @ Err(_)) => {
+                eprintln!("I was in middle or first");
                 return x;
             }
-            Err(ParserError::EntryError) => {
+            (false, Err(ParserError::EntryError)) => {
                 eprintln!("I was in entry error");
                 break;
             }
-            Ok(_) => {
+            (_, Ok(_)) => {
                 eprintln!("I was in OK");
             }
         }
+
+        first = false;
     }
 
     Ok(())
 }
 
 fn ident_type_pair<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
+    eprintln!("I entered the pair");
     let mut lex = lexer.clone();
 
     lex.next_matches_func(|x| matches!(x, Ident(_)))
@@ -80,12 +93,8 @@ fn expression<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
 
 fn variable_decl<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
     let mut lex = lexer.clone();
-    lex.next_matches(Let).to_entry()?;
-    lex.next_matches_func(|x| matches!(x, Ident(_)))?;
 
-    // TODO: for now required
-    lex.next_matches(Colon)?;
-    lex.next_matches_func(|x| matches!(x, Ident(_)))?;
+    ident_type_pair(&mut lex).to_entry()?;
 
     lex.next_matches(Eq)?;
 
@@ -99,10 +108,12 @@ fn variable_decl<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
 
 fn block_stmt<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
     let mut lex = lexer.clone();
+
     lex.next_matches(OCBracket).to_entry()?;
+    eprintln!("this is after the OCBracket");
 
     loop {
-        match variable_decl(lexer) {
+        match variable_decl(&mut lex) {
             x @ Err(ParserError::MiddleError) => {
                 return x;
             }
@@ -135,6 +146,8 @@ fn parse_function<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
             Ok(_) => continue,
         }
     }
+
+    eprintln!("I left the pair");
 
     lex.next_matches(CParen)?;
 

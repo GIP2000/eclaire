@@ -6,10 +6,6 @@ use proc_lexer::Lexer;
 
 #[derive(Debug, Lexer, PartialEq, Clone, Copy)]
 pub enum LexToken<'a> {
-    #[regex("[ \n\t]")]
-    #[regex("//[^\n]*\n")]
-    Skip,
-
     #[regex("fn")]
     Fn,
     #[regex("\\(")]
@@ -37,14 +33,18 @@ pub enum LexToken<'a> {
 
     #[regex("\"[^\"]*\"", func = parse_string)]
     StrLit(&'a str),
-    #[regex("[0-9][0-9]*", parse_int)]
+    #[regex("[0-9][0-9]*", func = parse_int)]
     IntLit(&'a str),
-    #[regex("[0-9][0-9]*\\.[0-9]*", parse_float)]
+    #[regex("[0-9][0-9]*\\.[0-9]*", func = parse_float)]
     FloatLit(&'a str),
     #[regex("'[^\n' ]'", func = parse_char)]
     CharLit(u8),
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*", func = parse_ident)]
     Ident(&'a str),
+
+    #[regex("[ \n\t]")]
+    #[regex("//[^\n]*\n")]
+    Skip,
 }
 
 pub trait LexerIterator<'a>: std::iter::Iterator<Item = LexerOutput<'a>> + Clone {
@@ -59,6 +59,9 @@ pub trait LexerIterator<'a>: std::iter::Iterator<Item = LexerOutput<'a>> + Clone
         let result = (val.0 == rhs).then_some(val).ok_or(anyhow!("No match"))?;
 
         *self = other;
+
+        eprintln!("next = {:?}", self.clone().next());
+
         Ok(result)
     }
 
@@ -67,6 +70,9 @@ pub trait LexerIterator<'a>: std::iter::Iterator<Item = LexerOutput<'a>> + Clone
         let val = other
             .next()
             .ok_or(anyhow!("No more lexical tokens found"))??;
+
+        eprintln!("val = {val:?}");
+
         let result = closure(val.0).then_some(val).ok_or(anyhow!("No match"))?;
         *self = other;
         Ok(result)
