@@ -236,10 +236,9 @@ impl<A: AcceptFunc + Eq> TrieNode<A> {
         index: &mut usize,
         rank: usize,
     ) -> Result<Self> {
-        let t =
-            TrieNode::from_iterator(&mut regex.bytes().map(|x| x.into()).peekable(), index)?.cat(
-                TrieNode::terminal(TerminalNodeElement::Accept(accept.clone(), rank), *index),
-            );
+        let t = Self::from_iterator(&mut regex.bytes().map(|x| x.into()).peekable(), index)?.cat(
+            Self::terminal(TerminalNodeElement::Accept(accept.clone(), rank), *index),
+        );
         *index += 1;
         Ok(t)
     }
@@ -453,22 +452,13 @@ impl<A: AcceptFunc + Eq> TrieNode<A> {
                     break;
                 }
 
-                (false, x, Some(Char(b'*'))) => {
-                    let node = if let Char(b'.') = x {
-                        let mut node = Self::terminal(0, *index);
+                (false, Char(b'.'), Some(Char(b'*'))) => {
+                    let mut node = Self::terminal(0, *index);
+                    *index += 1;
+                    for a in 1..DFA_SIZE {
+                        node = node.or(Self::terminal(TerminalNodeElement::Char(a as u8), *index));
                         *index += 1;
-                        for a in 1..DFA_SIZE {
-                            node =
-                                node.or(Self::terminal(TerminalNodeElement::Char(a as u8), *index));
-                            *index += 1;
-                        }
-
-                        node
-                    } else {
-                        let node = Self::terminal(x.clone(), *index);
-                        *index += 1;
-                        node
-                    };
+                    }
 
                     root_node = Some(match root_node {
                         Some(t) => t.cat(node.star()),
@@ -476,22 +466,33 @@ impl<A: AcceptFunc + Eq> TrieNode<A> {
                     });
                 }
 
-                (false, x, _) => {
-                    let node = if let Char(b'.') = x {
-                        let mut node = Self::terminal(0, *index);
-                        *index += 1;
-                        for a in 1..DFA_SIZE {
-                            node =
-                                node.or(Self::terminal(TerminalNodeElement::Char(a as u8), *index));
-                            *index += 1;
-                        }
+                (false, x, Some(Char(b'*'))) => {
+                    let node = Self::terminal(x.clone(), *index);
+                    *index += 1;
 
-                        node
-                    } else {
-                        let node = Self::terminal(x.clone(), *index);
+                    root_node = Some(match root_node {
+                        Some(t) => t.cat(node.star()),
+                        None => node.star(),
+                    });
+                }
+
+                (false, Char(b'.'), _) => {
+                    let mut node = Self::terminal(0, *index);
+                    *index += 1;
+                    for a in 1..DFA_SIZE {
+                        node = node.or(Self::terminal(TerminalNodeElement::Char(a as u8), *index));
                         *index += 1;
-                        node
-                    };
+                    }
+
+                    root_node = Some(match root_node {
+                        Some(t) => t.cat(node),
+                        None => node,
+                    });
+                }
+
+                (false, x, _) => {
+                    let node = Self::terminal(x.clone(), *index);
+                    *index += 1;
 
                     root_node = Some(match root_node {
                         Some(t) => t.cat(node),

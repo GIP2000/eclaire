@@ -243,12 +243,16 @@ where
                             let old_rank = rank_map.get(&(i, a));
 
                             match old_rank {
-                                Some(old) if *old > current_rank => x.upgrade(f.clone()),
-                                None => x.upgrade(f.clone()),
+                                Some(old) if *old > current_rank => {
+                                    x.upgrade(f.clone());
+                                    rank_map.insert((i, a), current_rank);
+                                }
+                                None => {
+                                    x.upgrade(f.clone());
+                                    rank_map.insert((i, a), current_rank);
+                                }
                                 _ => {}
                             }
-
-                            rank_map.insert((i, a), current_rank);
                         });
                     }
                 }
@@ -362,23 +366,9 @@ where
         &self,
         input: &'a str,
     ) -> Result<(A::Output<'a>, usize), LexerError<A::Error>> {
-        enum ResultState<A> {
-            Fail,
-            AcceptAt(usize, A),
-        }
-
-        impl<A> Debug for ResultState<A> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                match self {
-                    Self::Fail => write!(f, "Fail"),
-                    Self::AcceptAt(arg0, _) => f.debug_tuple("AcceptAt").field(arg0).finish(),
-                }
-            }
-        }
-
         use TransitionType::*;
         let mut state = 0;
-        let mut result = ResultState::Fail;
+        let mut result = Err(LexerError::MatchNotFound);
 
         for (input_idx, a) in input.bytes().chain(std::iter::once(b'\0')).enumerate() {
             let t = &self[(state, a)];
@@ -391,23 +381,21 @@ where
                     break;
                 }
                 Accpet(f) => {
-                    result = ResultState::AcceptAt(input_idx, f.clone());
+                    result = Ok((input_idx, f.clone()));
                     break;
                 }
                 AccpetOr(i, f) => {
                     state = *i;
-                    result = ResultState::AcceptAt(input_idx, f.clone());
+                    result = Ok((input_idx, f.clone()));
                 }
             }
         }
 
-        match result {
-            ResultState::Fail => Err(LexerError::MatchNotFound),
-            ResultState::AcceptAt(end, f) => f
-                .convert(&input[..end])
-                .map_err(|err| LexerError::ExternalError(err))
-                .map(|x| (x, end)),
-        }
+        result.and_then(|(end, f)| {
+            f.convert(&input[..end])
+                .map_err(|err| err.into())
+                .map(|x| (x, end))
+        })
     }
 
     fn lex<'d, 'a>(&'d self, input: &'a str) -> Lex<'a, 'd, A, Self> {

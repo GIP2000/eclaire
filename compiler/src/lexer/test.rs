@@ -8,8 +8,6 @@ fn test_lexer() {
     let mut lexer = LexToken::lex("fn {}").map(|x| x.map(|LexerOutput { meta: _, data: x }| x));
     __lexer_gen__::LexTokenDFA.debug_print("asdfn {}\0");
 
-    let a = __lexer_gen__::LexTokenDFA.lex("").next().unwrap();
-
     assert_eq!(lexer.next().unwrap().unwrap(), Fn);
     assert_eq!(lexer.next().unwrap().unwrap(), OCBracket);
     assert_eq!(lexer.next().unwrap().unwrap(), CCBracket);

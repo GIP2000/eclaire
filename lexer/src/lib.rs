@@ -86,7 +86,7 @@ pub enum LexerIteratorError<E> {
     #[error("No more tokens to lex")]
     NoMoreTokens,
     #[error(transparent)]
-    LexerError(LexerError<E>),
+    LexerError(#[from] LexerError<E>),
 }
 
 impl<
@@ -148,7 +148,7 @@ pub enum LexerError<E> {
     #[error("Failed to lex next token")]
     InternalLexerError,
     #[error(transparent)]
-    ExternalError(E),
+    ExternalError(#[from] E),
 }
 
 impl<'a, 'd, A, D> Iterator for Lex<'a, 'd, A, D>
@@ -167,7 +167,7 @@ where
             Ok(x) => x,
             Err(err) => {
                 self.has_errored = true;
-                return Some(Err(LexerIteratorError::LexerError(err)));
+                return Some(Err(err.into()));
             }
         };
 
