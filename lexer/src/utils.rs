@@ -42,6 +42,7 @@ impl<T: Clone + Eq> Clone for VecSet<T> {
     }
 }
 
+#[allow(dead_code)]
 impl<T> VecSet<T>
 where
     T: Eq,
@@ -101,6 +102,7 @@ impl<K: Eq + Debug, V: Debug> Debug for VecMap<K, V> {
     }
 }
 
+#[allow(dead_code)]
 impl<K, V> VecMap<K, V>
 where
     K: Eq,

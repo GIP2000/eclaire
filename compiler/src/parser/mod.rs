@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod test;
 
-use crate::lexer::{LexToken, LexerIterator};
+use crate::lexer::LexToken;
+
+use lexer::{LexerIterator, LexerIteratorError};
 
 use thiserror::Error;
 
@@ -17,6 +19,12 @@ pub enum ParserError {
 
 pub type Result<T> = core::result::Result<T, ParserError>;
 
+impl<E> From<LexerIteratorError<E>> for ParserError {
+    fn from(value: LexerIteratorError<E>) -> Self {
+        todo!()
+    }
+}
+
 impl From<anyhow::Error> for ParserError {
     fn from(_value: anyhow::Error) -> Self {
         ParserError::MiddleError
@@ -25,6 +33,12 @@ impl From<anyhow::Error> for ParserError {
 
 pub trait FromParseResultTrait<T> {
     fn to_entry(self) -> Result<T>;
+}
+
+impl<T, E> FromParseResultTrait<T> for std::result::Result<T, LexerIteratorError<E>> {
+    fn to_entry(self) -> Result<T> {
+        self.map_err(|_| ParserError::EntryError)
+    }
 }
 
 impl<T> FromParseResultTrait<T> for anyhow::Result<T> {
@@ -39,7 +53,9 @@ impl<T> FromParseResultTrait<T> for Result<T> {
     }
 }
 
-fn parse_translation_unit<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
+fn parse_translation_unit<'a>(
+    lexer: &mut impl LexerIterator<'a, LexToken<'a>, anyhow::Error>,
+) -> Result<()> {
     let mut first = true;
     loop {
         match (first, parse_function(lexer)) {
@@ -62,7 +78,9 @@ fn parse_translation_unit<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> 
     Ok(())
 }
 
-fn ident_type_pair<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
+fn ident_type_pair<'a>(
+    lexer: &mut impl LexerIterator<'a, LexToken<'a>, anyhow::Error>,
+) -> Result<()> {
     eprintln!("I entered the pair");
     let mut lex = lexer.clone();
 
@@ -76,7 +94,7 @@ fn ident_type_pair<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
     Ok(())
 }
 
-fn expression<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
+fn expression<'a>(lexer: &mut impl LexerIterator<'a, LexToken<'a>, anyhow::Error>) -> Result<()> {
     let mut lex = lexer.clone();
 
     lex.next_matches_func(|x| {
@@ -91,7 +109,9 @@ fn expression<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
     Ok(())
 }
 
-fn variable_decl<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
+fn variable_decl<'a>(
+    lexer: &mut impl LexerIterator<'a, LexToken<'a>, anyhow::Error>,
+) -> Result<()> {
     let mut lex = lexer.clone();
 
     ident_type_pair(&mut lex).to_entry()?;
@@ -106,7 +126,7 @@ fn variable_decl<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
     Ok(())
 }
 
-fn block_stmt<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
+fn block_stmt<'a>(lexer: &mut impl LexerIterator<'a, LexToken<'a>, anyhow::Error>) -> Result<()> {
     let mut lex = lexer.clone();
 
     lex.next_matches(OCBracket).to_entry()?;
@@ -127,7 +147,9 @@ fn block_stmt<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
     Ok(())
 }
 
-fn parse_function<'a>(lexer: &mut impl LexerIterator<'a>) -> Result<()> {
+fn parse_function<'a>(
+    lexer: &mut impl LexerIterator<'a, LexToken<'a>, anyhow::Error>,
+) -> Result<()> {
     let mut lex = lexer.clone();
 
     lex.next_matches(Fn).to_entry()?;

@@ -21,9 +21,10 @@ struct RegexAttributeArgs {
 struct BoxStr(Box<str>);
 
 impl AcceptFunc for BoxStr {
+    type Error = Box<dyn std::error::Error>;
     type Output<'a> = &'a str;
 
-    fn convert<'a>(&self, input: &'a str) -> anyhow::Result<Self::Output<'a>> {
+    fn convert<'a>(&self, input: &'a str) -> Result<Self::Output<'a>, Self::Error> {
         Ok(input)
     }
 }
@@ -182,18 +183,16 @@ pub fn build_dfa(input: TokenStream) -> TokenStream {
         mod __lexer_gen__ {
             use super::*;
 
-            pub(crate) type DFAType = lexer::dfa::DFAStatic<#state_count, #DFA_SIZE, FnPContainer>;
-
-            pub(crate) type LexerType<'a> = lexer::Lex<'a, 'static, __lexer_gen__::FnPContainer, DFAType>;
-
+            type DFAType = lexer::dfa::DFAStatic<#state_count, #DFA_SIZE, FnPContainer>;
 
             #[derive(Clone)]
             pub struct FnPContainer(for<'a> fn(&'a str) -> anyhow::Result<#enum_name_for_impl>);
 
             impl lexer::AcceptFunc for FnPContainer {
+                type Error = anyhow::Error;
                 type Output<'a> = #enum_name_for_impl;
 
-                fn convert<'a>(&self, input: &'a str) -> anyhow::Result<Self::Output<'a>> {
+                fn convert<'a>(&self, input: &'a str) -> Result<Self::Output<'a>, Self::Error> {
                     self.0(input)
                 }
             }

@@ -1,9 +1,10 @@
+use thiserror::Error;
+
 use crate::{
-    trie::{TerminalNodeElement, Trie, TrieNode},
+    trie::{TerminalNodeElement, Trie, TrieError, TrieNode},
     utils::{VecMap, VecSet},
-    AcceptFunc, Lex,
+    AcceptFunc, Lex, LexerError,
 };
-use anyhow::bail;
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -16,6 +17,14 @@ pub enum TransitionType<A: AcceptFunc> {
     Fail,
     Accpet(A),
     AccpetOr(usize, A),
+}
+
+#[derive(Debug, Error)]
+pub enum DFABuildError {
+    #[error(transparent)]
+    TrieError(TrieError),
+    #[error("Empty regex iterator")]
+    EmptyRegexIter,
 }
 
 impl<A: AcceptFunc> std::fmt::Debug for TransitionType<A> {
@@ -117,17 +126,19 @@ where
 {
     pub fn from_regexes<S: AsRef<str>, I: Iterator<Item = (S, A)>>(
         mut iter: I,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, DFABuildError> {
         let mut size = 0;
         let mut root = if let Some((regex, accept)) = iter.next() {
-            TrieNode::build_from_regex(regex.as_ref(), accept.clone(), &mut size, 0)?
+            TrieNode::build_from_regex(regex.as_ref(), accept.clone(), &mut size, 0)
+                .map_err(|err| DFABuildError::TrieError(err))?
         } else {
-            anyhow::bail!("Empty array found");
+            return Err(DFABuildError::EmptyRegexIter);
         };
 
         for (rank, (regex, accept)) in iter.enumerate() {
             root =
-                TrieNode::or_from_regex(root, regex.as_ref(), accept.clone(), &mut size, rank + 1)?;
+                TrieNode::or_from_regex(root, regex.as_ref(), accept.clone(), &mut size, rank + 1)
+                    .map_err(|err| DFABuildError::TrieError(err))?;
         }
 
         let follow_pos = root.calculate_follow_pos(size);
@@ -226,10 +237,6 @@ where
                 match input {
                     TerminalNodeElement::Char(_) => {
                         d_trans[i][usize::from(input)].add_value(state_idx);
-                    }
-                    // TODO: make sure this works
-                    TerminalNodeElement::Epsilon => {
-                        unimplemented!("Need to rethink this")
                     }
                     TerminalNodeElement::Accept(f, current_rank) => {
                         d_trans[i].iter_mut().enumerate().for_each(|(a, x)| {
@@ -351,7 +358,10 @@ where
         }
     }
 
-    fn get_next_lex<'a>(&self, input: &'a str) -> anyhow::Result<(A::Output<'a>, usize)> {
+    fn get_next_lex<'a>(
+        &self,
+        input: &'a str,
+    ) -> Result<(A::Output<'a>, usize), LexerError<A::Error>> {
         enum ResultState<A> {
             Fail,
             AcceptAt(usize, A),
@@ -371,12 +381,6 @@ where
         let mut result = ResultState::Fail;
 
         for (input_idx, a) in input.bytes().chain(std::iter::once(b'\0')).enumerate() {
-            // let print = if a.is_ascii_alphanumeric() {
-            //     &(a as char) as &dyn std::fmt::Debug
-            // } else {
-            //     &a as &dyn std::fmt::Debug
-            // };
-
             let t = &self[(state, a)];
 
             match t {
@@ -398,8 +402,11 @@ where
         }
 
         match result {
-            ResultState::AcceptAt(end, f) => f.convert(&input[..end]).map(|x| (x, end)),
-            ResultState::Fail => bail!("Failed to find a new token"),
+            ResultState::Fail => Err(LexerError::MatchNotFound),
+            ResultState::AcceptAt(end, f) => f
+                .convert(&input[..end])
+                .map_err(|err| LexerError::ExternalError(err))
+                .map(|x| (x, end)),
         }
     }
 
@@ -453,7 +460,12 @@ where
 
 #[cfg(test)]
 mod test {
-    use anyhow::Result;
+    use crate::LexerOutput;
+    use std::error::Error;
+
+    type BError = Box<dyn Error>;
+
+    type Result<T> = std::result::Result<T, BError>;
 
     use super::*;
 
@@ -468,9 +480,10 @@ mod test {
     type F = for<'a> fn(&'a str) -> Result<&'a str>;
 
     impl AcceptFunc for F {
+        type Error = Box<dyn Error>;
         type Output<'a> = &'a str;
 
-        fn convert<'a>(&self, input: &'a str) -> anyhow::Result<Self::Output<'a>> {
+        fn convert<'a>(&self, input: &'a str) -> Result<Self::Output<'a>> {
             self(input)
         }
     }
@@ -494,13 +507,20 @@ mod test {
 
         type F = for<'a> fn(&'a str) -> Result<Tokens>;
 
-        #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+        #[derive(Debug, Clone, Hash, Eq)]
         struct FnContainer(F, &'static str);
 
+        impl PartialEq for FnContainer {
+            fn eq(&self, other: &Self) -> bool {
+                self.1 == other.1
+            }
+        }
+
         impl AcceptFunc for FnContainer {
+            type Error = BError;
             type Output<'a> = Tokens;
 
-            fn convert<'a>(&self, input: &'a str) -> anyhow::Result<Self::Output<'a>> {
+            fn convert<'a>(&self, input: &'a str) -> Result<Self::Output<'a>> {
                 self.0(input)
             }
         }
@@ -530,9 +550,18 @@ mod test {
             x => format!("{:?}", x),
         });
 
+        // let mut lex = dfa.lex("fn clap fn").filter_map(|x| match x {
+        //     Ok((Skip, _)) => None,
+        //     Ok((x, _)) => Some(Ok(x)),
+        //     Err(er) => Some(Err(er)),
+        // });
+
         let mut lex = dfa.lex("fn clap fn").filter_map(|x| match x {
-            Ok((Skip, _)) => None,
-            Ok((x, _)) => Some(Ok(x)),
+            Ok(LexerOutput {
+                meta: _,
+                data: Skip,
+            }) => None,
+            Ok(LexerOutput { meta: _, data: x }) => Some(Ok(x)),
             Err(er) => Some(Err(er)),
         });
 
@@ -557,9 +586,10 @@ mod test {
         let combined: DFABoxed<_> = DFABoxed::from_regexes(x.into_iter()).unwrap();
         let input = "if else \"hi there my name is greg\" if else   \"this is really crazy\" if";
 
-        let mut lex_iter = combined
-            .lex(input)
-            .filter_map(|x| x.ok().and_then(|(x, _)| (!x.is_empty()).then_some(x)));
+        let mut lex_iter = combined.lex(input).filter_map(|x| {
+            x.ok()
+                .and_then(|LexerOutput { meta: _, data: x }| (!x.is_empty()).then_some(x))
+        });
 
         assert_eq!(lex_iter.next().unwrap(), "if");
         assert_eq!(lex_iter.next().unwrap(), "else");
@@ -611,9 +641,10 @@ mod test {
         let combined: DFABoxed<_> = DFABoxed::from_regexes(x.into_iter()).unwrap();
         let input = "= == === = =";
 
-        let mut lex_iter = combined
-            .lex(input)
-            .filter_map(|x| x.ok().and_then(|(x, _)| (x != " ").then_some(x)));
+        let mut lex_iter = combined.lex(input).filter_map(|x| {
+            x.ok()
+                .and_then(|LexerOutput { meta: _, data: x }| (x != " ").then_some(x))
+        });
 
         assert_eq!(lex_iter.next().unwrap(), "=");
         assert_eq!(lex_iter.next().unwrap(), "==");

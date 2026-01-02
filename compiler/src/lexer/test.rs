@@ -5,8 +5,10 @@ use LexToken::*;
 
 #[test]
 fn test_lexer() {
-    let mut lexer = LexToken::lex("fn {}").map(|x| x.map(|(x, _)| x));
+    let mut lexer = LexToken::lex("fn {}").map(|x| x.map(|LexerOutput { meta: _, data: x }| x));
     __lexer_gen__::LexTokenDFA.debug_print("asdfn {}\0");
+
+    let a = __lexer_gen__::LexTokenDFA.lex("").next().unwrap();
 
     assert_eq!(lexer.next().unwrap().unwrap(), Fn);
     assert_eq!(lexer.next().unwrap().unwrap(), OCBracket);
@@ -16,7 +18,7 @@ fn test_lexer() {
 
 #[test]
 fn test_intlit() {
-    let mut lexer = LexToken::lex("123").map(|x| x.map(|(x, _)| x));
+    let mut lexer = LexToken::lex("123").map(|x| x.map(|LexerOutput { meta: _, data: x }| x));
     __lexer_gen__::LexTokenDFA.debug_print("0123456789ab \0");
 
     assert_eq!(lexer.next().unwrap().unwrap(), IntLit("123"));
@@ -33,7 +35,7 @@ fn test_block_stmt() {
         let b: y = x;
 }",
     )
-    .map(|x| x.map(|(x, _)| x));
+    .map(|x| x.map(|LexerOutput { meta: _, data: x }| x));
 
     assert_eq!(lexer.next().unwrap().unwrap(), Fn);
     assert_eq!(lexer.next().unwrap().unwrap(), Ident("foo"));

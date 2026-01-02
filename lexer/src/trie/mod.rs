@@ -1,8 +1,23 @@
 use crate::utils::VecSet;
-use anyhow::{anyhow, bail, Result};
-use std::{collections::VecDeque, fmt::Debug, iter::Peekable};
-
 use crate::{dfa::DFA_SIZE, AcceptFunc};
+use std::{collections::VecDeque, fmt::Debug, iter::Peekable};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum TrieError {
+    #[error("Invalid start character {0}")]
+    InvalidStart(u8),
+    #[error("Empty Regex")]
+    EmptyRegex,
+    #[error("Invalid escape parameter {0}")]
+    InvalidEscapeParameter(usize),
+    #[error("Invalid range pattern it must be [a-b]")]
+    InvalidRangePattern,
+    #[error("Invalid empty bracket in regex")]
+    EmptyBrackets,
+}
+
+type Result<T> = std::result::Result<T, TrieError>;
 
 #[derive(Debug, Default, PartialEq, Clone)]
 pub(crate) struct TrieMeta {
@@ -104,7 +119,6 @@ impl<A: AcceptFunc + Eq> Trie<A> {
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum TerminalNodeElement<A: AcceptFunc> {
     Char(u8),
-    Epsilon,
     Accept(A, usize),
 }
 
@@ -120,7 +134,6 @@ impl<A: AcceptFunc> Debug for TerminalNodeElement<A> {
 
                 f.debug_tuple("Char").field(readable).finish()
             }
-            Self::Epsilon => write!(f, "Epsilon"),
             Self::Accept(_, rank) => f.debug_tuple("Char").field(rank).finish(),
         }
     }
@@ -130,7 +143,6 @@ impl<A: AcceptFunc> From<TerminalNodeElement<A>> for usize {
     fn from(value: TerminalNodeElement<A>) -> Self {
         match value {
             TerminalNodeElement::Char(x) => x as usize,
-            TerminalNodeElement::Epsilon => unimplemented!("Think through epsilon more"),
             TerminalNodeElement::Accept(_, _) => char::MAX as usize + 1,
         }
     }
@@ -143,12 +155,9 @@ impl<A: AcceptFunc> From<u8> for TerminalNodeElement<A> {
 }
 
 impl<A: AcceptFunc> TerminalNodeElement<A> {
+    #[inline(always)]
     fn is_nullable(&self) -> bool {
-        use TerminalNodeElement::*;
-        match self {
-            Char(_) | Accept(_, _) => false,
-            Epsilon => true,
-        }
+        false
     }
 }
 
@@ -249,15 +258,13 @@ impl<A: AcceptFunc + Eq> TrieNode<A> {
         iter: &mut Peekable<I>,
         index: &mut usize,
     ) -> Result<Self> {
-        // let mut root_node: Option<Self> = None;
-
         use TerminalNodeElement::*;
 
         let is_not = iter.peek().is_some_and(|x| matches!(x, Char(b'^')));
 
         if is_not {
             iter.next()
-                .ok_or(anyhow!("Unreachable I just peeked and found a ^"))?;
+                .expect("Unreachable I just peeked and found a ^");
         }
 
         let mut letters = VecSet::new();
@@ -271,12 +278,6 @@ impl<A: AcceptFunc + Eq> TrieNode<A> {
                     // normal with escaped chars
                     let value = iter.next().expect("I checked with the peek");
                     letters.insert(value);
-                    // root_node = Some(
-                    //     root_node
-                    //         .map(|t| t.or(Self::terminal(value.clone(), *index)))
-                    //         .unwrap_or(Self::terminal(value, *index)),
-                    // );
-                    // *index += 1;
                 }
                 (Char(b']'), _) => {
                     if is_not {
@@ -290,7 +291,7 @@ impl<A: AcceptFunc + Eq> TrieNode<A> {
                                 })
                             })
                             .reduce(|acc, val| acc.or(val))
-                            .ok_or(anyhow!("Invalid empty []"));
+                            .ok_or(TrieError::EmptyBrackets);
                     } else {
                         return letters
                             .into_iter()
@@ -300,48 +301,27 @@ impl<A: AcceptFunc + Eq> TrieNode<A> {
                                 result
                             })
                             .reduce(|acc, val| acc.or(val))
-                            .ok_or(anyhow!("Invalid empty []"));
+                            .ok_or(TrieError::EmptyBrackets);
                     }
                 } // end
                 (a, Some(Char(b'-'))) => {
                     let _ = iter.next().expect("I checked with the peek");
-                    let b = iter
-                        .next()
-                        .ok_or(anyhow!("Error invalid pattern \"a-\" without a 'b'"))?;
+                    let b = iter.next().ok_or(TrieError::InvalidRangePattern)?;
 
                     let (a, b) = match (a, b) {
                         (Char(a), Char(b)) => (a, b),
-                        _ => bail!("Error: Invalid token on other side of -"),
+                        _ => unreachable!("Error: Invalid token on other side of -"),
                     };
 
                     letters.extend((a..=b).map(|x| Char(x)));
-
-                    // let mut node = root_node.unwrap_or_else(|| {
-                    //     let node = Self::terminal(a, *index);
-                    //     a += 1;
-                    //     *index += 1;
-                    //     node
-                    // });
-                    //
-                    // for a in a..=b {
-                    //     node = node.or(Self::terminal(a, *index));
-                    //     *index += 1;
-                    // }
-                    // root_node = Some(node);
                 } // range
                 (value, _) => {
                     letters.insert(value);
-                    // root_node = Some(
-                    //     root_node
-                    //         .map(|t| t.or(Self::terminal(value.clone(), *index)))
-                    //         .unwrap_or(Self::terminal(value, *index)),
-                    // );
-                    // *index += 1;
-                } // normal
+                }
             };
         }
 
-        bail!("Failed to find end ']' in regex")
+        Err(TrieError::InvalidRangePattern)
     }
 
     fn from_iterator<I: Iterator<Item = TerminalNodeElement<A>>>(
@@ -455,8 +435,7 @@ impl<A: AcceptFunc + Eq> TrieNode<A> {
                     if matches!(iter.peek(), Some(Char(b'*'))) {
                         next_tree = next_tree.star();
                     }
-                    // I can't use the .map(|| ..).unwrap_or(..) pattern cause of
-                    // the borrow checker
+
                     root_node = Some(match root_node {
                         Some(r) => r.cat(next_tree),
                         None => next_tree,
@@ -469,7 +448,7 @@ impl<A: AcceptFunc + Eq> TrieNode<A> {
                     root_node = Some(
                         root_node
                             .map(|t| t.or(next_tree))
-                            .ok_or(anyhow!("'|' can not be the first character"))?,
+                            .ok_or(TrieError::InvalidStart(b'|'))?,
                     );
                     break;
                 }
@@ -520,12 +499,11 @@ impl<A: AcceptFunc + Eq> TrieNode<A> {
                     });
                 }
 
-                (true, _, _) => bail!("Invalid pattern"),
+                (true, x, _) => return Err(TrieError::InvalidEscapeParameter(x.into())),
             };
         }
 
-        let result = root_node.ok_or(anyhow!("Failed to find value"));
-        result
+        root_node.ok_or(TrieError::EmptyRegex)
     }
 
     pub(crate) fn calculate_follow_pos(&self, size: usize) -> Vec<VecSet<usize>> {
@@ -590,9 +568,13 @@ mod test {
     use super::*;
 
     impl AcceptFunc for &str {
+        type Error = Box<dyn std::error::Error>;
         type Output<'a> = &'a str;
 
-        fn convert<'a>(&self, input: &'a str) -> anyhow::Result<Self::Output<'a>> {
+        fn convert<'a>(
+            &self,
+            input: &'a str,
+        ) -> std::result::Result<Self::Output<'a>, Self::Error> {
             Ok(input.into())
         }
     }
