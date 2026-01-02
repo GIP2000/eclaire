@@ -58,9 +58,22 @@ impl Parse for RegexAttributeArgs {
     }
 }
 
-#[proc_macro_derive(Lexer, attributes(regex))]
+#[proc_macro_derive(Lexer, attributes(regex, regex_error))]
 pub fn build_dfa(input: TokenStream) -> TokenStream {
     let mut input_enum = parse_macro_input!(input as DeriveInput);
+
+    let error_type = input_enum
+        .attrs
+        .iter()
+        .find_map(|att| {
+            att.path()
+                .is_ident("regex_error")
+                .then_some(())
+                .and_then(|_| att.parse_args::<syn::TypePath>().ok())
+                .map(|x| quote! {#x})
+        })
+        .unwrap_or(quote! {Box<dyn std::error::Error>});
+
     let enum_name = &input_enum.ident;
 
     let data = match &mut input_enum.data {
@@ -72,6 +85,7 @@ pub fn build_dfa(input: TokenStream) -> TokenStream {
 
     let regexes = data.variants.iter().flat_map(|variant| {
         let ident = &variant.ident;
+        let error_type = error_type.clone();
         variant.attrs.iter().enumerate().filter_map(move |(ia, att)| {
             if !att.path().is_ident("regex") {
                 return None;
@@ -91,11 +105,11 @@ pub fn build_dfa(input: TokenStream) -> TokenStream {
 
                     let func_impl = match lifetime_count {
                         1 => {
-                            quote! {fn #name<'a>(input: &'a str) -> anyhow::Result<#enum_name<'a>> {
+                            quote! {fn #name<'a>(input: &'a str) -> std::result::Result<#enum_name<'a>, #error_type> {
                                 Ok(#enum_name::#ident)
                             }}
                         }
-                        0 => quote! {fn #name<'a>(input: &'a str) -> anyhow::Result<#enum_name> {
+                        0 => quote! {fn #name<'a>(input: &'a str) -> std::result::Result<#enum_name, #error_type> {
                             Ok(#enum_name::#ident)
                         }},
                         _ => panic!("Invalid amount of lifetime parameters"),
@@ -186,13 +200,13 @@ pub fn build_dfa(input: TokenStream) -> TokenStream {
             type DFAType = lexer::dfa::DFAStatic<#state_count, #DFA_SIZE, FnPContainer>;
 
             #[derive(Clone)]
-            pub struct FnPContainer(for<'a> fn(&'a str) -> anyhow::Result<#enum_name_for_impl>);
+            pub struct FnPContainer(for<'a> fn(&'a str) -> std::result::Result<#enum_name_for_impl, #error_type>);
 
             impl lexer::AcceptFunc for FnPContainer {
-                type Error = anyhow::Error;
+                type Error = #error_type;
                 type Output<'a> = #enum_name_for_impl;
 
-                fn convert<'a>(&self, input: &'a str) -> Result<Self::Output<'a>, Self::Error> {
+                fn convert<'a>(&self, input: &'a str) -> std::result::Result<Self::Output<'a>, Self::Error> {
                     self.0(input)
                 }
             }

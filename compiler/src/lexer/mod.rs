@@ -1,11 +1,14 @@
 #[cfg(test)]
 mod test;
 
-use anyhow::Result;
 use lexer::LexerOutput;
 use proc_lexer::Lexer;
 
+type MyLexerError = anyhow::Error;
+type Result<T> = std::result::Result<T, MyLexerError>;
+
 #[derive(Debug, Lexer, PartialEq, Clone, Copy)]
+#[regex_error(MyLexerError)]
 pub enum LexToken<'a> {
     #[regex("fn")]
     Fn,
@@ -49,7 +52,7 @@ pub enum LexToken<'a> {
 }
 
 impl<'a> LexToken<'a> {
-    pub fn lex(input: &'a str) -> impl lexer::LexerIterator<'a, Self, anyhow::Error> {
+    pub fn lex(input: &'a str) -> impl lexer::LexerIterator<'a, Self, MyLexerError> {
         <Self as lexer::Lexer<'a, _, _>>::lex(input).filter(|x| {
             !matches!(
                 x,
