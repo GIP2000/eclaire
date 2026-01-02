@@ -20,8 +20,8 @@ pub enum ParserError {
 pub type Result<T> = core::result::Result<T, ParserError>;
 
 impl<E> From<LexerIteratorError<E>> for ParserError {
-    fn from(value: LexerIteratorError<E>) -> Self {
-        todo!()
+    fn from(_value: LexerIteratorError<E>) -> Self {
+        ParserError::MiddleError
     }
 }
 
