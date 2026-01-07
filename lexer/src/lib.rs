@@ -118,18 +118,16 @@ pub trait LexerIterator<'a, T: Debug + Clone + PartialEq, E: Debug>:
         Ok(result)
     }
 
-    fn next_matches_func<F: Fn(T) -> bool>(
+    fn next_matches_func<R, F: Fn(T) -> Option<R>>(
         &mut self,
         closure: F,
-    ) -> Result<LexerOutput<'a, T>, LexerIteratorError<E>> {
+    ) -> Result<R, LexerIteratorError<E>> {
         let mut other = self.clone();
         let val = other.next().ok_or(LexerIteratorError::NoMoreTokens)??;
 
         eprintln!("val = {val:?}");
 
-        let result = closure(val.data.clone())
-            .then_some(val)
-            .ok_or(LexerIteratorError::DoesNotMatch)?;
+        let result = closure(val.data.clone()).ok_or(LexerIteratorError::DoesNotMatch)?;
         *self = other;
         Ok(result)
     }

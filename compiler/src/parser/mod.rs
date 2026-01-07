@@ -1,194 +1,89 @@
 #[cfg(test)]
 mod test;
 
-use crate::lexer::LexToken;
+mod grammer;
+use std::marker::PhantomData;
 
+use grammer::TranslationUnit;
 use lexer::{LexerIterator, LexerIteratorError};
 
+use crate::lexer::{LexToken, MyLexerError};
 use thiserror::Error;
 
-use LexToken::*;
-
 #[derive(Debug, Error)]
-pub enum ParserError {
-    #[error("The pattern could not be started")]
-    EntryError,
-    #[error("There was an error when parsing")]
-    MiddleError,
+pub enum ParserError<E> {
+    #[error("lexer error")]
+    LexerError(#[from] LexerIteratorError<E>),
+    #[error("Other Error")]
+    Other,
 }
 
-pub type Result<T> = core::result::Result<T, ParserError>;
+pub type Result<T> = std::result::Result<T, ParserError<MyLexerError>>;
 
-impl<E> From<LexerIteratorError<E>> for ParserError {
-    fn from(_value: LexerIteratorError<E>) -> Self {
-        ParserError::MiddleError
-    }
-}
+trait Parse
+where
+    Self: Sized,
+{
+    fn from_lexer<'a>(
+        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+    ) -> Result<Self>;
 
-impl From<anyhow::Error> for ParserError {
-    fn from(_value: anyhow::Error) -> Self {
-        ParserError::MiddleError
-    }
-}
-
-pub trait FromParseResultTrait<T> {
-    fn to_entry(self) -> Result<T>;
-}
-
-impl<T, E> FromParseResultTrait<T> for std::result::Result<T, LexerIteratorError<E>> {
-    fn to_entry(self) -> Result<T> {
-        self.map_err(|_| ParserError::EntryError)
-    }
-}
-
-impl<T> FromParseResultTrait<T> for anyhow::Result<T> {
-    fn to_entry(self) -> Result<T> {
-        self.map_err(|_| ParserError::EntryError)
-    }
-}
-
-impl<T> FromParseResultTrait<T> for Result<T> {
-    fn to_entry(self) -> Result<T> {
-        self.map_err(|_| ParserError::EntryError)
-    }
-}
-
-fn parse_translation_unit<'a>(
-    lexer: &mut impl LexerIterator<'a, LexToken<'a>, anyhow::Error>,
-) -> Result<()> {
-    let mut first = true;
-    loop {
-        match (first, parse_function(lexer)) {
-            (_, x @ Err(ParserError::MiddleError)) | (true, x @ Err(_)) => {
-                eprintln!("I was in middle or first");
-                return x;
-            }
-            (false, Err(ParserError::EntryError)) => {
-                eprintln!("I was in entry error");
-                break;
-            }
-            (_, Ok(_)) => {
-                eprintln!("I was in OK");
-            }
-        }
-
-        first = false;
+    fn from_lexer_safe<'a>(
+        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+    ) -> Result<Self> {
+        let mut copy = token_stream.clone();
+        let result = Self::from_lexer(&mut copy)?;
+        *token_stream = copy;
+        Ok(result)
     }
 
-    Ok(())
-}
-
-fn ident_type_pair<'a>(
-    lexer: &mut impl LexerIterator<'a, LexToken<'a>, anyhow::Error>,
-) -> Result<()> {
-    eprintln!("I entered the pair");
-    let mut lex = lexer.clone();
-
-    lex.next_matches_func(|x| matches!(x, Ident(_)))
-        .to_entry()?;
-
-    lex.next_matches(Colon)?;
-    lex.next_matches_func(|x| matches!(x, Ident(_)))?;
-
-    *lexer = lex;
-    Ok(())
-}
-
-fn expression<'a>(lexer: &mut impl LexerIterator<'a, LexToken<'a>, anyhow::Error>) -> Result<()> {
-    let mut lex = lexer.clone();
-
-    lex.next_matches_func(|x| {
-        matches!(
-            x,
-            Ident(_) | CharLit(_) | StrLit(_) | IntLit(_) | FloatLit(_)
-        )
-    })
-    .to_entry()?;
-
-    *lexer = lex;
-    Ok(())
-}
-
-fn variable_decl<'a>(
-    lexer: &mut impl LexerIterator<'a, LexToken<'a>, anyhow::Error>,
-) -> Result<()> {
-    let mut lex = lexer.clone();
-
-    ident_type_pair(&mut lex).to_entry()?;
-
-    lex.next_matches(Eq)?;
-
-    expression(&mut lex)?;
-
-    lex.next_matches(SemiColon)?;
-
-    *lexer = lex;
-    Ok(())
-}
-
-fn block_stmt<'a>(lexer: &mut impl LexerIterator<'a, LexToken<'a>, anyhow::Error>) -> Result<()> {
-    let mut lex = lexer.clone();
-
-    lex.next_matches(OCBracket).to_entry()?;
-    eprintln!("this is after the OCBracket");
-
-    loop {
-        match variable_decl(&mut lex) {
-            x @ Err(ParserError::MiddleError) => {
-                return x;
-            }
-            Err(ParserError::EntryError) => break,
-            Ok(_) => continue,
+    fn from_lexer_many<'a, 'b, I: LexerIterator<'a, LexToken<'a>, MyLexerError>>(
+        token_stream: &'b mut I,
+    ) -> ParseIter<'a, 'b, I, Self> {
+        ParseIter {
+            iter: token_stream,
+            phantom_data: PhantomData,
         }
     }
-
-    lex.next_matches(CCBracket)?;
-    *lexer = lex;
-    Ok(())
 }
 
-fn parse_function<'a>(
-    lexer: &mut impl LexerIterator<'a, LexToken<'a>, anyhow::Error>,
-) -> Result<()> {
-    let mut lex = lexer.clone();
+struct ParseIter<'a, 'b, I: LexerIterator<'a, LexToken<'a>, MyLexerError>, O: Parse> {
+    iter: &'b mut I,
+    phantom_data: PhantomData<&'a O>,
+}
 
-    lex.next_matches(Fn).to_entry()?;
-    eprintln!("found fn");
-    lex.next_matches_func(|x| matches!(x, Ident(_)))?;
-    eprintln!("found ident");
-    lex.next_matches(OParen)?;
-    eprintln!("found OParen");
+impl<'a, 'b, I: LexerIterator<'a, LexToken<'a>, MyLexerError>, T: Parse> std::iter::Iterator
+    for ParseIter<'a, 'b, I, T>
+{
+    type Item = Result<T>;
 
-    loop {
-        match ident_type_pair(lexer) {
-            x @ Err(ParserError::MiddleError) => {
-                return x;
-            }
-            Err(ParserError::EntryError) => break,
-            Ok(_) => continue,
+    fn next(&mut self) -> Option<Self::Item> {
+        match T::from_lexer_safe(self.iter) {
+            Err(ParserError::LexerError(LexerIteratorError::NoMoreTokens)) => None,
+            x @ Ok(_) | x @ Err(_) => Some(x),
         }
     }
-
-    eprintln!("I left the pair");
-
-    lex.next_matches(CParen)?;
-
-    if let Ok(_) = lex.next_matches(SkinnyArrow) {
-        lex.next_matches_func(|x| matches!(x, Ident(_)))?;
-    }
-
-    block_stmt(&mut lex)?;
-
-    *lexer = lex;
-    Ok(())
 }
 
-pub fn parse(source_code: &str) -> Result<()> {
+trait ParserInto<'a, Output: Parse>
+where
+    Self: LexerIterator<'a, LexToken<'a>, MyLexerError>,
+{
+    fn parse(&mut self) -> Result<Output> {
+        Output::from_lexer_safe(self)
+    }
+
+    fn parse_many<'b>(&'b mut self) -> ParseIter<'a, 'b, Self, Output> {
+        Output::from_lexer_many(self)
+    }
+}
+
+impl<'a, Output: Parse, I: LexerIterator<'a, LexToken<'a>, MyLexerError>> ParserInto<'a, Output>
+    for I
+{
+}
+
+pub fn parse(source_code: &str) -> Result<TranslationUnit> {
     let mut lexer = LexToken::lex(source_code);
-    let lexemes: Box<_> = lexer.clone().collect();
-    eprintln!("lexemes: {:?}", lexemes);
-
-    parse_translation_unit(&mut lexer)?;
-
-    Ok(())
+    lexer.parse()
 }

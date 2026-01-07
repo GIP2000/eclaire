@@ -4,7 +4,7 @@ mod test;
 use lexer::LexerOutput;
 use proc_lexer::Lexer;
 
-type MyLexerError = anyhow::Error;
+pub type MyLexerError = anyhow::Error;
 type Result<T> = std::result::Result<T, MyLexerError>;
 
 #[derive(Debug, Lexer, PartialEq, Clone, Copy)]
@@ -34,6 +34,8 @@ pub enum LexToken<'a> {
     Eq,
     #[regex(";")]
     SemiColon,
+    #[regex(",")]
+    Comma,
 
     #[regex("\"[^\"]*\"", func = parse_string)]
     StrLit(&'a str),
