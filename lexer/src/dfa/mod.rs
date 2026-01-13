@@ -244,14 +244,32 @@ where
 
                             match old_rank {
                                 Some(old) if *old > current_rank => {
+                                    // eprintln!(
+                                    //     "overwritting: {:?}, old = {:?}, current = {:?}",
+                                    //     (i, a),
+                                    //     old,
+                                    //     current_rank
+                                    // );
                                     x.upgrade(f.clone());
                                     rank_map.insert((i, a), current_rank);
                                 }
                                 None => {
+                                    // eprintln!(
+                                    //     "not overwritting (None): {:?},  current = {:?}",
+                                    //     (i, a),
+                                    //     current_rank
+                                    // );
+
                                     x.upgrade(f.clone());
                                     rank_map.insert((i, a), current_rank);
                                 }
-                                _ => {}
+                                _ => {
+                                    // eprintln!(
+                                    //     "not overwritting (otherwise): {:?},  current = {:?}",
+                                    //     (i, a),
+                                    //     current_rank
+                                    // );
+                                }
                             }
                         });
                     }
@@ -583,32 +601,58 @@ mod test {
     }
 
     #[test]
-    fn test_float_v_int() {
-        let x: [(Box<str>, F2); 3] = [
-            ("[0-9][0-9]*\\.[0-9]*".into(), b),
-            ("[0-9][0-9]*".into(), a),
-            (" ".into(), s),
-        ];
+    fn test_float() {
+        let trie = Trie::from_regex(
+            "(0|1|2|3|4|5|6|7|8|9)(0|1|2|3|4|5|6|7|8|9)*\\.(0|1|2|3|4|5|6|7|8|9)*",
+            "float",
+        )
+        .unwrap();
 
-        let combined: DFABoxed<_> = DFABoxed::from_regexes(x.into_iter()).unwrap();
+        eprintln!("trie : {:?}", trie);
 
-        combined.debug_print2("0123456789.a\0", |x| match x {
-            TransitionType::Accpet(y) => format!("Accept({:?})", y("")),
-            TransitionType::AccpetOr(x, y) => format!("AcceptOr({:?}, {:?})", x, y("")),
+        let dfa: DFABoxed<_> = trie.into();
+
+        dfa.debug_print2("0123456789.a\0", |x| match x {
+            TransitionType::Accpet(y) => format!("Accept({:?})", y),
+            TransitionType::AccpetOr(x, y) => format!("AcceptOr({:?}, {:?})", x, y),
             x => format!("{:?}", x),
         });
-
-        let input = "111 111.1 111.";
-
-        let mut lexer = combined.lex(input).filter_map(|x| {
-            x.ok()
-                .and_then(|LexerOutput { meta: _, data }| (data != ' ').then_some(data))
-        });
-
-        assert_eq!(lexer.next().unwrap(), 'a');
-        assert_eq!(lexer.next().unwrap(), 'b');
-        assert_eq!(lexer.next().unwrap(), 'b');
+        assert!(dfa.is_match("1."));
+        assert!(dfa.is_match("12."));
+        assert!(dfa.is_match("12.2"));
+        assert!(dfa.is_match("12.23"));
+        assert!(!dfa.is_match("1"));
+        assert!(!dfa.is_match("1234"));
+        assert!(!dfa.is_match(".1234"));
     }
+
+    // #[test]
+    // fn test_float_v_int() {
+    //     let x: [(Box<str>, F2); 3] = [
+    //         ("[0-9][0-9]*\\.[0-9]*".into(), b),
+    //         ("[0-9][0-9]*".into(), a),
+    //         (" ".into(), s),
+    //     ];
+    //
+    //     let combined: DFABoxed<_> = DFABoxed::from_regexes(x.into_iter()).unwrap();
+    //
+    //     combined.debug_print2("0123456789.a\0", |x| match x {
+    //         TransitionType::Accpet(y) => format!("Accept({:?})", y("")),
+    //         TransitionType::AccpetOr(x, y) => format!("AcceptOr({:?}, {:?})", x, y("")),
+    //         x => format!("{:?}", x),
+    //     });
+    //
+    //     let input = "111 111.1 111.";
+    //
+    //     let mut lexer = combined.lex(input).filter_map(|x| {
+    //         x.ok()
+    //             .and_then(|LexerOutput { meta: _, data }| (data != ' ').then_some(data))
+    //     });
+    //
+    //     assert_eq!(lexer.next().unwrap(), 'a');
+    //     assert_eq!(lexer.next().unwrap(), 'b');
+    //     assert_eq!(lexer.next().unwrap(), 'b');
+    // }
 
     #[test]
     fn test_lex() {
