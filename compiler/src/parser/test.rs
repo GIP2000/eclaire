@@ -19,7 +19,18 @@ fn test_wrong_function_syntax() {
 fn test_function_syntax() {
     let val = parse(
         "
-        fn foo(a:b, c:d, d:f) -> foo {}
+        fn foo(a:b, c:d, d:f) -> foo {
+            let x = 2;
+            let y = z;
+            let z = 12.;
+            let z = 12.2;
+            x;
+            y;
+            \"hi\";
+            123;
+            '1';
+            12.34;
+        }
         fn foo2(a:b, c:d, d:f) -> bar {}
         ",
     )

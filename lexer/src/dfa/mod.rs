@@ -330,7 +330,7 @@ where
         let letters: std::collections::BTreeSet<_> = letters.bytes().collect();
         for i in 0..self.states_len() {
             for a in letters.iter() {
-                let print = if (b'a'..=b'z').contains(&a) {
+                let print = if a.is_ascii_alphanumeric() || *a == b'.' {
                     &(*a as char) as &dyn std::fmt::Debug
                 } else {
                     &a as &dyn std::fmt::Debug
@@ -465,6 +465,29 @@ mod test {
         Ok(x)
     }
 
+    type F2 = for<'a> fn(&'a str) -> Result<char>;
+
+    fn a<'a>(_x: &'a str) -> Result<char> {
+        Ok('a')
+    }
+
+    fn b<'a>(_x: &'a str) -> Result<char> {
+        Ok('b')
+    }
+
+    fn s<'a>(_x: &'a str) -> Result<char> {
+        Ok(' ')
+    }
+
+    impl AcceptFunc for F2 {
+        type Error = Box<dyn Error>;
+        type Output<'a> = char;
+
+        fn convert<'a>(&self, input: &'a str) -> Result<Self::Output<'a>> {
+            self(input)
+        }
+    }
+
     type F = for<'a> fn(&'a str) -> Result<&'a str>;
 
     impl AcceptFunc for F {
@@ -557,6 +580,34 @@ mod test {
         assert_eq!(lex.next().unwrap().unwrap(), Ident);
         assert_eq!(lex.next().unwrap().unwrap(), Fn);
         assert!(lex.next().is_none());
+    }
+
+    #[test]
+    fn test_float_v_int() {
+        let x: [(Box<str>, F2); 3] = [
+            ("[0-9][0-9]*\\.[0-9]*".into(), b),
+            ("[0-9][0-9]*".into(), a),
+            (" ".into(), s),
+        ];
+
+        let combined: DFABoxed<_> = DFABoxed::from_regexes(x.into_iter()).unwrap();
+
+        combined.debug_print2("0123456789.a\0", |x| match x {
+            TransitionType::Accpet(y) => format!("Accept({:?})", y("")),
+            TransitionType::AccpetOr(x, y) => format!("AcceptOr({:?}, {:?})", x, y("")),
+            x => format!("{:?}", x),
+        });
+
+        let input = "111 111.1 111.";
+
+        let mut lexer = combined.lex(input).filter_map(|x| {
+            x.ok()
+                .and_then(|LexerOutput { meta: _, data }| (data != ' ').then_some(data))
+        });
+
+        assert_eq!(lexer.next().unwrap(), 'a');
+        assert_eq!(lexer.next().unwrap(), 'b');
+        assert_eq!(lexer.next().unwrap(), 'b');
     }
 
     #[test]

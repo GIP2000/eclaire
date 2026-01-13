@@ -26,6 +26,7 @@ pub struct Function {
     pub name: Ident,
     pub args: Vec<IdentPair>,
     pub ret: Option<Ident>,
+    pub statments: Vec<Statment>,
 }
 
 impl Parse for Function {
@@ -52,48 +53,130 @@ impl Parse for Function {
 
         token_stream.next_matches(LexToken::OCBracket)?;
 
-        //TODO: stuff in the middle
+        let statments: Vec<Statment> = token_stream
+            .parse_many()
+            .take_while(Result::is_ok)
+            .map(Result::unwrap)
+            .collect();
 
         token_stream.next_matches(LexToken::CCBracket)?;
 
-        Ok(Self { name, args, ret })
+        Ok(Self {
+            name,
+            args,
+            ret,
+            statments,
+        })
     }
 }
 
+#[derive(Debug)]
 pub enum Statment {
+    Assignment(Ident, Expression),
     Expression(Expression),
+    // add loops
+    // add match
 }
 
-pub enum Expression {
-    Ident(Ident),
-    BinaryOp(Box<Expression>, BinaryOperators, Box<Expression>),
-}
+impl Parse for Statment {
+    fn from_lexer<'a>(
+        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+    ) -> Result<Self> {
+        let ident: Result<Ident> = token_stream
+            .next_matches(LexToken::Let)
+            .map_err(|err| err.into())
+            .and_then(|_| token_stream.parse())
+            .or_else(|_| token_stream.parse())
+            .and_then(|x| {
+                token_stream.next_matches(LexToken::Eq)?;
+                Ok(x)
+            });
 
-pub enum BinaryOperators {
-    Eq,
-}
+        eprintln!("has ident = {ident:?}");
 
-impl<'a> TryFrom<LexToken<'a>> for BinaryOperators {
-    type Error = ParserError<MyLexerError>;
+        let expression: Expression = token_stream.parse()?;
+        token_stream.next_matches(LexToken::SemiColon)?;
 
-    fn try_from(value: LexToken<'a>) -> Result<Self> {
-        match value {
-            LexToken::Eq => Ok(Self::Eq),
-            _ => Err(lexer::LexerIteratorError::DoesNotMatch.into()),
+        eprintln!("has expression = {expression:?}");
+
+        match ident {
+            Ok(ident) => return Ok(Self::Assignment(ident, expression)),
+            Err(_) => Ok(Self::Expression(expression)),
         }
     }
 }
 
-impl Parse for BinaryOperators {
+#[derive(Debug)]
+pub enum Expression {
+    // TODO: Figure out how to do this nested shit
+    // BinaryOp(Box<Expression>, BinaryOperator, Box<Expression>),
+    // UnaryOp(Box<Expression>, UnaryOperator),
+    Ident(Ident),
+    Constant(Box<str>), // TODO: enrich this type / expand it with more stuff
+}
+
+impl Parse for Expression {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
-        // let op: Option<Self> = token_stream.next_matches_func(|x| {
-        //     let x: Result<BinaryOperators> = x.try_into();
-        //     x
-        // });
+        if let Ok(_) = token_stream.next_matches(LexToken::OParen) {
+            let expression: Expression = token_stream.parse()?;
+            token_stream.next_matches(LexToken::CParen)?;
+            return Ok(expression);
+        }
+
+        let ident: Result<Ident> = token_stream.parse();
+        if let Ok(ident) = ident {
+            return Ok(Self::Ident(ident));
+        }
+
+        let constant = token_stream.next_matches_func(|x| {
+            use LexToken::*;
+            match x {
+                StrLit(x) | IntLit(x) | FloatLit(x) => Some(x.to_string().into_boxed_str()),
+                CharLit(x) => Some(format!("{}", x).into_boxed_str()),
+                _ => None,
+            }
+        });
+
+        if let Ok(constant) = constant {
+            return Ok(Self::Constant(constant));
+        }
+
+        return Err(ParserError::Other);
+    }
+}
+
+#[derive(Debug)]
+pub enum UnaryOperator {
+    Not,
+}
+
+#[derive(Debug)]
+pub enum BinaryOperator {
+    EqEq,
+}
+
+impl<'a> TryFrom<LexToken<'a>> for BinaryOperator {
+    type Error = ParserError<MyLexerError>;
+
+    fn try_from(value: LexToken<'a>) -> Result<Self> {
         todo!()
-        // op
+        // TODO: add this back in when ready
+        // match value {
+        //     LexToken::Eq => Ok(Self::Eq),
+        //     _ => Err(lexer::LexerIteratorError::DoesNotMatch.into()),
+        // }
+    }
+}
+
+impl Parse for BinaryOperator {
+    fn from_lexer<'a>(
+        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+    ) -> Result<Self> {
+        token_stream
+            .next_matches_func(|x| BinaryOperator::try_from(x).ok())
+            .map_err(|err| err.into())
     }
 }
 
