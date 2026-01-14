@@ -24,7 +24,7 @@ impl Parse for TranslationUnit {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
-        trace!("entering TranslationUnit");
+        trace!("Entering TranslationUnit");
         Ok(Self {
             functions: token_stream.parse_many().collect::<Result<_>>()?,
         })
