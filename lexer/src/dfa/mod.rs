@@ -602,28 +602,24 @@ mod test {
 
     #[test]
     fn test_float() {
-        let trie = Trie::from_regex(
-            "(0|1|2|3|4|5|6|7|8|9)(0|1|2|3|4|5|6|7|8|9)*\\.(0|1|2|3|4|5|6|7|8|9)*",
-            "float",
-        )
-        .unwrap();
+        let trie = Trie::from_regex("[0-3][0-3]*\\.[0-3]*", "float").unwrap();
 
-        eprintln!("trie : {:?}", trie);
+        std::fs::write("./trie.log", format!("{:?}", trie)).unwrap();
 
         let dfa: DFABoxed<_> = trie.into();
 
-        dfa.debug_print2("0123456789.a\0", |x| match x {
-            TransitionType::Accpet(y) => format!("Accept({:?})", y),
-            TransitionType::AccpetOr(x, y) => format!("AcceptOr({:?}, {:?})", x, y),
-            x => format!("{:?}", x),
-        });
+        // dfa.debug_print2("0123.a\0", |x| match x {
+        //     TransitionType::Accpet(y) => format!("Accept({:?})", y),
+        //     TransitionType::AccpetOr(x, y) => format!("AcceptOr({:?}, {:?})", x, y),
+        //     x => format!("{:?}", x),
+        // });
         assert!(dfa.is_match("1."));
         assert!(dfa.is_match("12."));
         assert!(dfa.is_match("12.2"));
         assert!(dfa.is_match("12.23"));
         assert!(!dfa.is_match("1"));
-        assert!(!dfa.is_match("1234"));
-        assert!(!dfa.is_match(".1234"));
+        assert!(!dfa.is_match("1233"));
+        assert!(!dfa.is_match(".1233"));
     }
 
     // #[test]

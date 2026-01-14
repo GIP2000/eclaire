@@ -35,9 +35,9 @@ impl TrieMeta {
         };
 
         let last_pos = if r.nullable {
-            l.first_pos.union(&r.first_pos).cloned().collect()
+            l.last_pos.union(&r.last_pos).cloned().collect()
         } else {
-            r.first_pos.clone()
+            r.last_pos.clone()
         };
 
         Self {
@@ -96,6 +96,7 @@ impl<A: AcceptFunc + Eq> Trie<A> {
     pub(crate) fn from_regex(regex: &str, accept: A) -> Result<Self> {
         let mut size = 0;
 
+        let a = TerminalNodeElement::Accept(accept.clone(), 0);
         let root: TrieNode<A> =
             TrieNode::from_iterator(&mut regex.bytes().map(|x| x.into()).peekable(), &mut size)?
                 // Add the accept state to the end
@@ -134,7 +135,7 @@ impl<A: AcceptFunc> Debug for TerminalNodeElement<A> {
 
                 f.debug_tuple("Char").field(readable).finish()
             }
-            Self::Accept(_, rank) => f.debug_tuple("Char").field(rank).finish(),
+            Self::Accept(_, rank) => f.debug_tuple("Accept").field(rank).finish(),
         }
     }
 }
@@ -174,29 +175,73 @@ where
 
 impl<A: AcceptFunc> Debug for TrieNode<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::CatNode(arg0, arg1, arg2) => f
-                .debug_tuple("CatNode")
-                .field(arg0)
-                .field(arg1)
-                .field(arg2)
-                .finish(),
-            Self::StarNode(arg0, arg1) => {
-                f.debug_tuple("StarNode").field(arg0).field(arg1).finish()
+        fn fmt_with_ident<A: AcceptFunc>(
+            value: &TrieNode<A>,
+            f: &mut std::fmt::Formatter<'_>,
+            indent_level: u32,
+        ) -> std::fmt::Result {
+            macro_rules! indent {
+                () => {
+                    for _ in 0..indent_level {
+                        write!(f, "\t")?;
+                    }
+                };
+
+                ($add: expr) => {
+                    for _ in 0..(indent_level + $add) {
+                        write!(f, "\t")?;
+                    }
+                };
             }
-            Self::OrNode(arg0, arg1, arg2) => f
-                .debug_tuple("OrNode")
-                .field(arg0)
-                .field(arg1)
-                .field(arg2)
-                .finish(),
-            Self::TerminalNode(arg0, arg1, arg2) => f
-                .debug_tuple("TerminalNode")
-                .field(arg0)
-                .field(arg1)
-                .field(arg2)
-                .finish(),
+
+            indent!();
+
+            enum Flat<'a, A: AcceptFunc> {
+                Single(&'a TrieNode<A>),
+                Double(&'a TrieNode<A>, &'a TrieNode<A>),
+                Term(&'a TerminalNodeElement<A>, usize),
+            }
+
+            let (inner, meta) = match value {
+                TrieNode::CatNode(trie_node, trie_node1, trie_meta) => {
+                    writeln!(f, "CatNode(")?;
+                    (Flat::Double(trie_node.as_ref(), trie_node1), trie_meta)
+                }
+                TrieNode::StarNode(trie_node, trie_meta) => {
+                    writeln!(f, "StarNode(")?;
+                    (Flat::Single(trie_node), trie_meta)
+                }
+                TrieNode::OrNode(trie_node, trie_node1, trie_meta) => {
+                    writeln!(f, "OrNode(")?;
+                    (Flat::Double(trie_node, trie_node1), trie_meta)
+                }
+                TrieNode::TerminalNode(terminal_node_element, trie_meta, idx) => {
+                    writeln!(f, "TerminalNode(")?;
+                    (Flat::Term(terminal_node_element, *idx), trie_meta)
+                }
+            };
+
+            match inner {
+                Flat::Single(trie_node) => {
+                    fmt_with_ident(trie_node, f, indent_level + 1)?;
+                }
+                Flat::Double(trie_node, trie_node1) => {
+                    fmt_with_ident(trie_node, f, indent_level + 1)?;
+                    fmt_with_ident(trie_node1, f, indent_level + 1)?;
+                }
+                Flat::Term(terminal_node_element, idx) => {
+                    indent!(1);
+                    writeln!(f, "{:?}, {:?}", terminal_node_element, idx)?;
+                }
+            }
+
+            indent!(1);
+            writeln!(f, "{:?}", meta)?;
+            indent!();
+            writeln!(f, ")")
         }
+
+        fmt_with_ident(self, f, 0)
     }
 }
 
