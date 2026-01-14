@@ -7,7 +7,10 @@ use std::marker::PhantomData;
 use grammer::TranslationUnit;
 use lexer::{LexerIterator, LexerIteratorError};
 
-use crate::lexer::{LexToken, MyLexerError};
+use crate::{
+    lexer::{LexToken, MyLexerError},
+    trace,
+};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -85,5 +88,8 @@ impl<'a, Output: Parse, I: LexerIterator<'a, LexToken<'a>, MyLexerError>> Parser
 
 pub fn parse(source_code: &str) -> Result<TranslationUnit> {
     let mut lexer = LexToken::lex(source_code);
-    lexer.parse()
+    trace!("starting parse");
+    let result = lexer.parse();
+    trace!("finished parse");
+    result
 }

@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod test;
 
+use crate::{info, trace};
 use lexer::LexerOutput;
 use proc_lexer::Lexer;
 
@@ -55,14 +56,16 @@ pub enum LexToken<'a> {
 
 impl<'a> LexToken<'a> {
     pub fn lex(input: &'a str) -> impl lexer::LexerIterator<'a, Self, MyLexerError> {
-        <Self as lexer::Lexer<'a, _, _>>::lex(input).filter(|x| {
-            !matches!(
-                x,
-                Ok(LexerOutput {
-                    meta: _,
-                    data: LexToken::Skip
-                })
-            )
+        <Self as lexer::Lexer<'a, _, _>>::lex(input).filter(|x| match x {
+            Ok(LexerOutput {
+                meta: _,
+                data: LexToken::Skip,
+            }) => false,
+            x => {
+                trace!("lexed a token");
+                info!("token found: {:?}", x);
+                true
+            }
         })
     }
 }

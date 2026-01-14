@@ -4,6 +4,7 @@ use super::{Parse, Result};
 use crate::{
     lexer::{LexToken, MyLexerError},
     parser::{ParserError, ParserInto},
+    trace,
 };
 
 #[derive(Debug)]
@@ -15,6 +16,7 @@ impl Parse for TranslationUnit {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
+        trace!("entering TranslationUnit");
         Ok(Self {
             functions: token_stream.parse_many().collect::<Result<_>>()?,
         })
@@ -33,6 +35,7 @@ impl Parse for Function {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
+        trace!("entering Function");
         token_stream.next_matches(LexToken::Fn)?;
 
         let name: Ident = token_stream.parse()?;
@@ -72,18 +75,32 @@ impl Parse for Function {
 
 #[derive(Debug)]
 pub enum Statment {
-    Assignment(Ident, Expression),
+    Assignment(Ident, Option<Ident>, Expression), // do I need the option? can I figure out the
+    // datatype always and replace this with an ident
+    // pair?
     Expression(Expression),
     // add loops
     // add match
+}
+
+impl Parse for (Ident, Option<Ident>) {
+    fn from_lexer<'a>(
+        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+    ) -> Result<Self> {
+        token_stream
+            .parse()
+            .map(|x: IdentPair| (x.name, Some(x.datatype)))
+            .or_else(|_| token_stream.parse().map(|x: Ident| (x, None)))
+    }
 }
 
 impl Parse for Statment {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
+        trace!("Entering Statment");
         let mut temp_token_stream = token_stream.clone();
-        let ident: Result<Ident> = temp_token_stream
+        let ident: Result<(Ident, Option<Ident>)> = temp_token_stream
             .next_matches(LexToken::Let)
             .map_err(|err| err.into())
             .and_then(|_| temp_token_stream.parse())
@@ -98,7 +115,7 @@ impl Parse for Statment {
         token_stream.next_matches(LexToken::SemiColon)?;
 
         match ident {
-            Ok(ident) => return Ok(Self::Assignment(ident, expression)),
+            Ok((ident, datatype)) => return Ok(Self::Assignment(ident, datatype, expression)),
             Err(_) => Ok(Self::Expression(expression)),
         }
     }
@@ -117,6 +134,7 @@ impl Parse for Expression {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
+        trace!("Entering Expression");
         if let Ok(_) = token_stream.next_matches(LexToken::OParen) {
             let expression: Expression = token_stream.parse()?;
             token_stream.next_matches(LexToken::CParen)?;
@@ -196,6 +214,7 @@ impl Parse for Ident {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
+        trace!("Entering Ident");
         token_stream
             .next_matches_func(|x| {
                 if let LexToken::Ident(x) = x {
@@ -219,6 +238,7 @@ impl Parse for IdentPair {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
+        trace!("Entering Ident Pair");
         let name = token_stream.parse()?;
         token_stream.next_matches(LexToken::Colon)?;
         let datatype = token_stream.parse()?;
