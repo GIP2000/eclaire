@@ -2,9 +2,19 @@ use clap::Parser;
 use eclaire::{all, fatal, info, parser::parse, trace, utils::logger::Level};
 use std::{
     fs::File,
-    io::{stdin, Read},
+    io::{stdin, stdout, Read},
     path::PathBuf,
 };
+
+macro_rules! parse_level {
+    ($val: expr) => {
+        |x: &str| -> anyhow::Result<eclaire::utils::logger::Level> {
+            Ok((x == "true")
+                .then_some($val)
+                .unwrap_or(eclaire::utils::logger::Level::none()))
+        }
+    };
+}
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -17,8 +27,8 @@ struct Cli {
         short,
         long,
         action = clap::ArgAction::SetTrue,
-        value_parser = |x: &str| -> anyhow::Result<Level> {Ok(if x == "true" {Level::debug()} else {Level::none()})})
-    ]
+        value_parser = parse_level!(Level::debug())
+    )]
     debug: Level,
 
     /// Optional trace infromation
@@ -26,8 +36,9 @@ struct Cli {
         short,
         long,
         action = clap::ArgAction::SetTrue,
-        value_parser = |x: &str| -> anyhow::Result<Level> {Ok(if x == "true" {Level::trace()} else {Level::none()})})
-    ]
+        value_parser = parse_level!(Level::trace())
+
+    )]
     trace: Level,
 
     /// Optional info infromation
@@ -35,8 +46,8 @@ struct Cli {
         short,
         long,
         action = clap::ArgAction::SetTrue,
-        value_parser = |x: &str| -> anyhow::Result<Level> {Ok(if x == "true" {Level::info()} else {Level::none()})})
-    ]
+        value_parser = parse_level!(Level::info())
+    )]
     info: Level,
 
     /// Optional warning infromation
@@ -44,8 +55,8 @@ struct Cli {
         short,
         long,
         action = clap::ArgAction::SetTrue,
-        value_parser = |x: &str| -> anyhow::Result<Level> {Ok(if x == "true" {Level::warn()} else {Level::none()})})
-    ]
+        value_parser = parse_level!(Level::warn())
+    )]
     warn: Level,
 
     /// Optional Output File
@@ -101,15 +112,42 @@ fn main() -> anyhow::Result<()> {
     trace!("Finished reading source code");
     info!("source code = {}", source_code);
 
-    match parse(&source_code) {
+    let ast = match parse(&source_code) {
         Ok(x) => {
             all!("Finished succesfully");
             info!("AST: {x:?}");
-            Ok(())
+            x
         }
         Err(x) => {
             fatal!("Error making program {:?}", x);
-            Err(anyhow::anyhow!("Error couldn't make program: {:?}", x))
+            return Err(anyhow::anyhow!("Error couldn't make program: {:?}", x));
         }
-    }
+    };
+
+    let mut file: std::fs::File;
+    let mut stdout = stdout();
+    let writer = match cli.output.as_ref() {
+        Some(path) => {
+            file = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(path)
+                .map_err(|err| {
+                    fatal!("Failed to open file {:?}: {:?}", path, err);
+                    err
+                })?;
+            &mut file as &mut dyn std::io::Write
+        }
+        None => &mut stdout as &mut dyn std::io::Write,
+    };
+
+    writeln!(writer, "{:?}", ast).map_err(|err| {
+        match cli.output.as_ref() {
+            Some(path) => fatal!("Failed to write to file {:?}: {:?}", path, err),
+            None => fatal!("Failed to write to stdout: {:?}", err),
+        }
+        err
+    })?;
+
+    Ok(())
 }
