@@ -105,15 +105,11 @@ pub trait LexerIterator<'a, T: Debug + Clone + PartialEq, E: Debug>:
         let mut other = self.clone();
         let val = other.next().ok_or(LexerIteratorError::NoMoreTokens)??;
 
-        eprintln!("val = {val:?}, rhs = {rhs:?}");
-
         let result = (val.data == rhs)
             .then_some(val)
             .ok_or(LexerIteratorError::DoesNotMatch)?;
 
         *self = other;
-
-        eprintln!("next = {:?}", self.clone().next());
 
         Ok(result)
     }
@@ -124,8 +120,6 @@ pub trait LexerIterator<'a, T: Debug + Clone + PartialEq, E: Debug>:
     ) -> Result<R, LexerIteratorError<E>> {
         let mut other = self.clone();
         let val = other.next().ok_or(LexerIteratorError::NoMoreTokens)??;
-
-        eprintln!("val = {val:?}");
 
         let result = closure(val.data.clone()).ok_or(LexerIteratorError::DoesNotMatch)?;
         *self = other;

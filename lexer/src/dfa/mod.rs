@@ -604,15 +604,8 @@ mod test {
     fn test_float() {
         let trie = Trie::from_regex("[0-3][0-3]*\\.[0-3]*", "float").unwrap();
 
-        std::fs::write("./trie.log", format!("{:?}", trie)).unwrap();
-
         let dfa: DFABoxed<_> = trie.into();
 
-        // dfa.debug_print2("0123.a\0", |x| match x {
-        //     TransitionType::Accpet(y) => format!("Accept({:?})", y),
-        //     TransitionType::AccpetOr(x, y) => format!("AcceptOr({:?}, {:?})", x, y),
-        //     x => format!("{:?}", x),
-        // });
         assert!(dfa.is_match("1."));
         assert!(dfa.is_match("12."));
         assert!(dfa.is_match("12.2"));
@@ -622,33 +615,34 @@ mod test {
         assert!(!dfa.is_match(".1233"));
     }
 
-    // #[test]
-    // fn test_float_v_int() {
-    //     let x: [(Box<str>, F2); 3] = [
-    //         ("[0-9][0-9]*\\.[0-9]*".into(), b),
-    //         ("[0-9][0-9]*".into(), a),
-    //         (" ".into(), s),
-    //     ];
-    //
-    //     let combined: DFABoxed<_> = DFABoxed::from_regexes(x.into_iter()).unwrap();
-    //
-    //     combined.debug_print2("0123456789.a\0", |x| match x {
-    //         TransitionType::Accpet(y) => format!("Accept({:?})", y("")),
-    //         TransitionType::AccpetOr(x, y) => format!("AcceptOr({:?}, {:?})", x, y("")),
-    //         x => format!("{:?}", x),
-    //     });
-    //
-    //     let input = "111 111.1 111.";
-    //
-    //     let mut lexer = combined.lex(input).filter_map(|x| {
-    //         x.ok()
-    //             .and_then(|LexerOutput { meta: _, data }| (data != ' ').then_some(data))
-    //     });
-    //
-    //     assert_eq!(lexer.next().unwrap(), 'a');
-    //     assert_eq!(lexer.next().unwrap(), 'b');
-    //     assert_eq!(lexer.next().unwrap(), 'b');
-    // }
+    #[test]
+    fn test_float_v_int() {
+        let x: [(Box<str>, F2); 3] = [
+            ("[0-9][0-9]*\\.[0-9]*".into(), b),
+            ("[0-9][0-9]*".into(), a),
+            (" ".into(), s),
+        ];
+
+        let combined: DFABoxed<_> = DFABoxed::from_regexes(x.into_iter()).unwrap();
+
+        combined.debug_print2("0123456789.a\0", |x| match x {
+            TransitionType::Accpet(y) => format!("Accept({:?})", y("")),
+            TransitionType::AccpetOr(x, y) => format!("AcceptOr({:?}, {:?})", x, y("")),
+            x => format!("{:?}", x),
+        });
+
+        let input = "111 111.1 111.";
+
+        let mut lexer = combined.lex(input).filter_map(|x| {
+            x.ok()
+                .and_then(|LexerOutput { meta: _, data }| (data != ' ').then_some(data))
+        });
+
+        assert_eq!(lexer.next().unwrap(), 'a');
+        assert_eq!(lexer.next().unwrap(), 'b');
+        assert_eq!(lexer.next().unwrap(), 'b');
+        assert!(lexer.next().is_none());
+    }
 
     #[test]
     fn test_lex() {

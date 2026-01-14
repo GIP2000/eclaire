@@ -82,22 +82,20 @@ impl Parse for Statment {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
-        let ident: Result<Ident> = token_stream
+        let mut temp_token_stream = token_stream.clone();
+        let ident: Result<Ident> = temp_token_stream
             .next_matches(LexToken::Let)
             .map_err(|err| err.into())
-            .and_then(|_| token_stream.parse())
-            .or_else(|_| token_stream.parse())
+            .and_then(|_| temp_token_stream.parse())
+            .or_else(|_| temp_token_stream.parse())
             .and_then(|x| {
-                token_stream.next_matches(LexToken::Eq)?;
+                temp_token_stream.next_matches(LexToken::Eq)?;
+                *token_stream = temp_token_stream;
                 Ok(x)
             });
 
-        eprintln!("has ident = {ident:?}");
-
         let expression: Expression = token_stream.parse()?;
         token_stream.next_matches(LexToken::SemiColon)?;
-
-        eprintln!("has expression = {expression:?}");
 
         match ident {
             Ok(ident) => return Ok(Self::Assignment(ident, expression)),
