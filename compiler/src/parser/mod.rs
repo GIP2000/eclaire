@@ -26,7 +26,7 @@ pub enum ParserError<E> {
 pub type Result<T> = std::result::Result<T, ParserError<MyLexerError>>;
 
 #[inline]
-pub fn safe_parse_wrapper<'a, I, O, F>(token_stream: &mut I, mut parser: F) -> Result<O>
+pub fn safe_parse_wrapper<'a, 'b, I, O, F>(token_stream: &mut I, parser: &mut F) -> Result<O>
 where
     I: LexerIterator<'a, LexToken<'a>, MyLexerError>,
     F: FnMut(&mut I) -> Result<O>,
@@ -64,7 +64,7 @@ where
     fn from_lexer_safe<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
-        safe_parse_wrapper(token_stream, Self::from_lexer)
+        safe_parse_wrapper(token_stream, &mut Self::from_lexer)
     }
 
     fn from_lexer_many<'a, 'b, I: LexerIterator<'a, LexToken<'a>, MyLexerError>>(
@@ -95,20 +95,6 @@ impl<'a, 'b, I: LexerIterator<'a, LexToken<'a>, MyLexerError>, T: Parse> std::it
     }
 }
 
-trait ParseIntoWith<'a>
-where
-    Self: LexerIterator<'a, LexToken<'a>, MyLexerError>,
-{
-    fn parse_with<Output>(
-        &mut self,
-        parser: impl FnMut(&mut Self) -> Result<Output>,
-    ) -> Result<Output> {
-        safe_parse_wrapper(self, parser)
-    }
-}
-
-impl<'a, I: LexerIterator<'a, LexToken<'a>, MyLexerError>> ParseIntoWith<'a> for I {}
-
 trait ParserInto<'a, Output: Parse>
 where
     Self: LexerIterator<'a, LexToken<'a>, MyLexerError>,
@@ -136,6 +122,61 @@ impl<T: for<'c> TryFrom<&'c LexToken<'c>>> Parse for T {
             .map_err(|err| err.into())
     }
 }
+
+struct ParseIterWith<
+    'a,
+    'b,
+    I: LexerIterator<'a, LexToken<'a>, MyLexerError>,
+    O,
+    F: FnMut(&mut I) -> Result<O>,
+> {
+    iter: &'b mut I,
+    func: F,
+    phaton_data: PhantomData<&'a O>,
+}
+
+impl<
+        'a,
+        'b,
+        I: LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        O,
+        F: FnMut(&mut I) -> Result<O>,
+    > Iterator for ParseIterWith<'a, 'b, I, O, F>
+{
+    type Item = Result<O>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match safe_parse_wrapper(self.iter, &mut self.func) {
+            Err(ParserError::LexerError(LexerIteratorError::NoMoreTokens)) => None,
+            x @ Ok(_) | x @ Err(_) => Some(x),
+        }
+    }
+}
+
+trait ParseIntoWith<'a>
+where
+    Self: LexerIterator<'a, LexToken<'a>, MyLexerError>,
+{
+    fn parse_with<Output>(
+        &mut self,
+        mut parser: impl FnMut(&mut Self) -> Result<Output>,
+    ) -> Result<Output> {
+        safe_parse_wrapper(self, &mut parser)
+    }
+
+    fn parse_with_many<'b, Output, F: FnMut(&mut Self) -> Result<Output>>(
+        &'b mut self,
+        parser: F,
+    ) -> ParseIterWith<'a, 'b, Self, Output, F> {
+        ParseIterWith {
+            iter: self,
+            func: parser,
+            phaton_data: PhantomData,
+        }
+    }
+}
+
+impl<'a, I: LexerIterator<'a, LexToken<'a>, MyLexerError>> ParseIntoWith<'a> for I {}
 
 pub fn parse(source_code: &str) -> Result<TranslationUnit> {
     let mut lexer = LexToken::lex(source_code);

@@ -16,75 +16,43 @@ pub enum Expression {
     Constant(Box<str>), // TODO: enrich this type / expand it with more stuff
 }
 
-impl Parse for Expression {
-    fn from_lexer<'a>(
-        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-    ) -> Result<Self> {
-        fn factor<'a>(
-            token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        ) -> Result<Expression> {
-            trace!("Entering factor");
+fn factor<'a>(
+    token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+) -> Result<Expression> {
+    trace!("Entering factor");
 
-            if let Ok(_) = token_stream.next_matches(LexToken::OParen) {
-                let expression: Expression = token_stream.parse()?;
-                token_stream.next_matches(LexToken::CParen)?;
-                return Ok(expression);
-            }
+    if let Ok(_) = token_stream.next_matches(LexToken::OParen) {
+        let expression: Expression = token_stream.parse()?;
+        token_stream.next_matches(LexToken::CParen)?;
+        return Ok(expression);
+    }
 
-            let ident: Result<Ident> = token_stream.parse();
-            if let Ok(ident) = ident {
-                return Ok(Expression::Ident(ident));
-            }
+    let ident: Result<Ident> = token_stream.parse();
+    if let Ok(ident) = ident {
+        return Ok(Expression::Ident(ident));
+    }
 
-            let constant = token_stream.next_matches_func(|x| {
-                use LexToken::*;
-                match x {
-                    StrLit(x) | IntLit(x) | FloatLit(x) => Some(x.to_string().into_boxed_str()),
-                    CharLit(x) => Some(format!("{}", x).into_boxed_str()),
-                    _ => None,
-                }
-            });
-
-            return Ok(Expression::Constant(constant?));
+    let constant = token_stream.next_matches_func(|x| {
+        use LexToken::*;
+        match x {
+            StrLit(x) | IntLit(x) | FloatLit(x) => Some(x.to_string().into_boxed_str()),
+            CharLit(x) => Some(format!("{}", x).into_boxed_str()),
+            _ => None,
         }
+    });
 
-        fn term<'a>(
-            token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        ) -> Result<Expression> {
-            trace!("Entering term");
+    return Ok(Expression::Constant(constant?));
+}
 
-            let mut expr = token_stream.parse_with(factor)?;
+fn term<'a>(
+    token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+) -> Result<Expression> {
+    trace!("Entering term");
 
-            while let Ok((op, second)) = token_stream.parse_with(|token_stream| {
-                let meta = token_stream
-                    .clone()
-                    .next()
-                    .ok_or(ParserError::LexerError(
-                        lexer::LexerIteratorError::NoMoreTokens,
-                    ))??
-                    .meta;
-                let op: BinaryOperator = token_stream.parse()?;
+    let expr = token_stream.parse_with(factor)?;
 
-                match op {
-                    BinaryOperator::Div | BinaryOperator::Mult => {}
-                    _ => return Err(crate::parser::ParserError::DoesNotMatch(meta.into())),
-                };
-
-                let second = token_stream.parse_with(factor)?;
-
-                Ok((op, second))
-            }) {
-                expr = Expression::BinaryOp(Box::new(expr), op, Box::new(second));
-            }
-
-            Ok(expr)
-        }
-
-        trace!("Entering Expression");
-
-        let mut expr = token_stream.parse_with(term)?;
-
-        while let Ok((op, second)) = token_stream.parse_with(|token_stream| {
+    Ok(token_stream
+        .parse_with_many(|token_stream| {
             let meta = token_stream
                 .clone()
                 .next()
@@ -95,18 +63,52 @@ impl Parse for Expression {
             let op: BinaryOperator = token_stream.parse()?;
 
             match op {
-                BinaryOperator::Add | BinaryOperator::Sub => {}
-                _ => return Err(crate::parser::ParserError::DoesNotMatch(meta.into())),
+                BinaryOperator::Div | BinaryOperator::Mult => {}
+                _ => return Err(ParserError::DoesNotMatch(meta.into())),
             };
 
-            let second = token_stream.parse_with(term)?;
+            let second = token_stream.parse_with(factor)?;
 
             Ok((op, second))
-        }) {
-            expr = Expression::BinaryOp(Box::new(expr), op, Box::new(second));
-        }
+        })
+        .map_while(|x| x.ok())
+        .fold(expr, |acc, (op, second)| {
+            Expression::BinaryOp(Box::new(acc), op, Box::new(second))
+        }))
+}
 
-        Ok(expr)
+impl Parse for Expression {
+    fn from_lexer<'a>(
+        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+    ) -> Result<Self> {
+        trace!("Entering Expression");
+
+        let expr = token_stream.parse_with(term)?;
+
+        Ok(token_stream
+            .parse_with_many(|token_stream| {
+                let meta = token_stream
+                    .clone()
+                    .next()
+                    .ok_or(ParserError::LexerError(
+                        lexer::LexerIteratorError::NoMoreTokens,
+                    ))??
+                    .meta;
+                let op: BinaryOperator = token_stream.parse()?;
+
+                match op {
+                    BinaryOperator::Add | BinaryOperator::Sub => {}
+                    _ => return Err(ParserError::DoesNotMatch(meta.into())),
+                };
+
+                let second = token_stream.parse_with(term)?;
+
+                Ok((op, second))
+            })
+            .map_while(|x| x.ok())
+            .fold(expr, |acc, (op, second)| {
+                Expression::BinaryOp(Box::new(acc), op, Box::new(second))
+            }))
     }
 }
 
