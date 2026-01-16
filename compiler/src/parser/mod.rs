@@ -5,7 +5,7 @@ mod grammer;
 use std::marker::PhantomData;
 
 use grammer::TranslationUnit;
-use lexer::{LexerIterator, LexerIteratorError};
+use lexer::{ErrorMeta, LexerIterator, LexerIteratorError};
 
 use crate::{
     lexer::{LexToken, MyLexerError},
@@ -15,8 +15,10 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ParserError<E> {
-    #[error("lexer error")]
+    #[error(transparent)]
     LexerError(#[from] LexerIteratorError<E>),
+    #[error("Failed to find parsing target, not match found: {0}")]
+    DoesNotMatch(ErrorMeta),
     #[error("Other Error")]
     Other,
 }
@@ -34,8 +36,25 @@ where
     fn from_lexer_safe<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
+        // Only say there is no more tokens if it starts with no more tokens
+        if let None | Some(Err(LexerIteratorError::NoMoreTokens)) = token_stream.clone().next() {
+            return Err(LexerIteratorError::NoMoreTokens.into());
+        };
+
         let mut copy = token_stream.clone();
-        let result = Self::from_lexer(&mut copy)?;
+        // Otherwise say that we Do not match if there is no more tokens
+        let result = Self::from_lexer(&mut copy).map_err(|err| match err {
+            ParserError::LexerError(lexer::LexerIteratorError::NoMoreTokens) => {
+                // TODO: make this better with an actual lineno and colno
+                ParserError::DoesNotMatch(ErrorMeta {
+                    lineno: 0,
+                    colno: 0,
+                    display: "Unexpected EOF".into(),
+                })
+            }
+            err => err,
+        })?;
+
         *token_stream = copy;
         Ok(result)
     }

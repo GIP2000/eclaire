@@ -383,12 +383,22 @@ where
     fn get_next_lex<'a>(
         &self,
         input: &'a str,
-    ) -> Result<(A::Output<'a>, usize), LexerError<A::Error>> {
+    ) -> (
+        Result<A::Output<'a>, LexerError<A::Error>>,
+        usize,
+        usize,
+        usize,
+    ) {
         use TransitionType::*;
         let mut state = 0;
-        let mut result = Err(LexerError::MatchNotFound);
+        let mut result = Err(());
+        let mut end = 0;
+
+        let mut lineno = 0;
+        let mut colno = 0;
 
         for (input_idx, a) in input.bytes().chain(std::iter::once(b'\0')).enumerate() {
+            end = input_idx;
             let t = &self[(state, a)];
 
             match t {
@@ -407,17 +417,41 @@ where
                     result = Ok((input_idx, f.clone()));
                 }
             }
+
+            if a == b'\n' {
+                lineno += 1;
+                colno = 0;
+            } else {
+                colno += 1;
+            }
         }
 
-        result.and_then(|(end, f)| {
-            f.convert(&input[..end])
-                .map_err(|err| err.into())
-                .map(|x| (x, end))
-        })
+        match result {
+            Ok((end, f)) => (
+                f.convert(&input[..end]).map_err(|err| err.into()),
+                end,
+                lineno,
+                colno,
+            ),
+            Err(_) => (
+                Err(LexerError::MatchNotFound(input[..end].into())),
+                end,
+                lineno,
+                colno,
+            ),
+        }
+
+        // result
+        //     .map_err(|_| LexerError::MatchNotFound(input[..end].into()))
+        //     .and_then(|(end, f)| {
+        //         f.convert(&input[..end])
+        //             .map_err(|err| err.into())
+        //             .map(|x| (x, end, lineno, colno))
+        //     })
     }
 
     fn lex<'d, 'a>(&'d self, input: &'a str) -> Lex<'a, 'd, A, Self> {
-        Lex::new(self, input, 0, false)
+        Lex::new(self, input)
     }
 
     fn is_match(&self, input: &str) -> bool {
@@ -700,11 +734,12 @@ mod test {
             .into();
         let input = "aaaaaabb";
 
-        let result = dfa.get_next_lex(input).unwrap();
+        let result = dfa.get_next_lex(input);
+        let result = (result.0.unwrap(), result.1);
         assert_eq!(result.0, "aaaaaab");
         assert_eq!(result.1, input.len() - 1);
 
-        assert!(matches!(dfa.get_next_lex("caaab"), Err(_)))
+        assert!(matches!(dfa.get_next_lex("caaab").0, Err(_)))
     }
 
     #[test]

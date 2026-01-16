@@ -119,7 +119,7 @@ fn main() -> anyhow::Result<()> {
             x
         }
         Err(x) => {
-            fatal!("Error making program {:?}", x);
+            fatal!("Error making program {}", x);
             return Err(anyhow::anyhow!("Error couldn't make program: {:?}", x));
         }
     };

@@ -4,6 +4,7 @@ use lexer::LexerIterator;
 
 use super::{Parse, Result};
 use crate::{
+    debug,
     lexer::{LexToken, MyLexerError},
     parser::{
         grammer::{
@@ -13,6 +14,7 @@ use crate::{
         ParserInto,
     },
     trace,
+    utils::iterator::IterPlusError,
 };
 
 #[derive(Debug)]
@@ -25,6 +27,7 @@ impl Parse for TranslationUnit {
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
         trace!("Entering TranslationUnit");
+
         Ok(Self {
             functions: token_stream.parse_many().collect::<Result<_>>()?,
         })
@@ -49,28 +52,30 @@ impl Parse for Function {
         let name: Ident = token_stream.parse()?;
 
         token_stream.next_matches(LexToken::OParen)?;
+
         let args = token_stream
             .parse_many()
-            .take_while(|x| matches!(x, Ok(_)))
+            .take_while(|x| x.is_ok())
             .collect::<Result<_>>()
             .expect("Unreachable: only valid entries of ident pair");
+
         token_stream.next_matches(LexToken::CParen)?;
 
-        let ret: Option<Ident> = if let Ok(_) = token_stream.next_matches(LexToken::SkinnyArrow) {
-            Some(token_stream.parse()?)
-        } else {
-            None
-        };
+        let ret: Option<Ident> = token_stream
+            .next_matches(LexToken::SkinnyArrow)
+            .ok()
+            .map(|_| token_stream.parse())
+            .transpose()?;
 
         token_stream.next_matches(LexToken::OCBracket)?;
 
-        let statments: Vec<Statment> = token_stream
-            .parse_many()
-            .take_while(Result::is_ok)
-            .map(Result::unwrap)
-            .collect();
+        let parse_iter = token_stream.parse_many();
 
-        token_stream.next_matches(LexToken::CCBracket)?;
+        let IterPlusError(statments, following) = parse_iter.collect();
+
+        token_stream
+            .next_matches(LexToken::CCBracket)
+            .map_err(|err| following.unwrap_or(err.into()))?;
 
         Ok(Self {
             name,
@@ -97,23 +102,25 @@ impl Parse for Statment {
     ) -> Result<Self> {
         trace!("Entering Statment");
         let mut temp_token_stream = token_stream.clone();
-        let ident: Result<(Ident, Option<Ident>)> = temp_token_stream
+
+        let ident = temp_token_stream
             .next_matches(LexToken::Let)
-            .map_err(|err| err.into())
-            .and_then(|_| temp_token_stream.parse())
-            .or_else(|_| temp_token_stream.parse())
-            .and_then(|x| {
+            .ok()
+            .map(|_| -> Result<_> {
+                trace!("Entering Let Statment");
+                let result = temp_token_stream.parse()?;
                 temp_token_stream.next_matches(LexToken::Eq)?;
                 *token_stream = temp_token_stream;
-                Ok(x)
-            });
+                Ok(result)
+            })
+            .transpose()?;
 
         let expression: Expression = token_stream.parse()?;
         token_stream.next_matches(LexToken::SemiColon)?;
 
         match ident {
-            Ok((ident, datatype)) => return Ok(Self::Assignment(ident, datatype, expression)),
-            Err(_) => Ok(Self::Expression(expression)),
+            Some((ident, datatype)) => return Ok(Self::Assignment(ident, datatype, expression)),
+            None => Ok(Self::Expression(expression)),
         }
     }
 }

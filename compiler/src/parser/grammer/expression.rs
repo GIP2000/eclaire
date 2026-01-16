@@ -42,11 +42,7 @@ impl Parse for Expression {
             }
         });
 
-        if let Ok(constant) = constant {
-            return Ok(Self::Constant(constant));
-        }
-
-        return Err(ParserError::Other);
+        return Ok(Self::Constant(constant?));
     }
 }
 
@@ -60,10 +56,10 @@ pub enum BinaryOperator {
     EqEq,
 }
 
-impl<'a> TryFrom<LexToken<'a>> for BinaryOperator {
+impl<'a> TryFrom<&LexToken<'a>> for BinaryOperator {
     type Error = ParserError<MyLexerError>;
 
-    fn try_from(value: LexToken<'a>) -> Result<Self> {
+    fn try_from(value: &LexToken<'a>) -> Result<Self> {
         todo!()
         // TODO: add this back in when ready
         // match value {

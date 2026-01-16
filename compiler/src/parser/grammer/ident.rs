@@ -28,12 +28,13 @@ impl Parse for Ident {
         token_stream
             .next_matches_func(|x| {
                 if let LexToken::Ident(x) = x {
-                    Some(x)
+                    Some(Ident {
+                        value: x.to_owned().into(),
+                    })
                 } else {
                     None
                 }
             })
-            .map(|x| Ident { value: x.into() })
             .map_err(|x| x.into())
     }
 }

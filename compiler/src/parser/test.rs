@@ -11,7 +11,7 @@ fn test_wrong_function_syntax() {
 
     assert!(matches!(
         val,
-        ParserError::LexerError(LexerIteratorError::DoesNotMatch)
+        ParserError::LexerError(LexerIteratorError::DoesNotMatch(_))
     ))
 }
 
@@ -33,8 +33,11 @@ fn test_function_syntax() {
         }
         fn foo2(a:b, c:d, d:f) -> bar {}
         ",
-    )
-    .expect("is valid");
+    );
+
+    eprintln!("val: {val:?}");
+
+    let val = val.expect("is valid");
 
     assert_eq!(val.functions.len(), 2);
 
