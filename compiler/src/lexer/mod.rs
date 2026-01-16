@@ -38,6 +38,9 @@ pub enum LexToken<'a> {
     #[regex(",")]
     Comma,
 
+    #[regex("\\.")]
+    Dot,
+
     #[regex("+")]
     Plus,
     #[regex("-")]
@@ -45,7 +48,63 @@ pub enum LexToken<'a> {
     #[regex("/")]
     Div,
     #[regex("\\*")]
-    Mult,
+    Star,
+    #[regex("%")]
+    Mod,
+
+    #[regex(">")]
+    Gt,
+    #[regex(">=")]
+    Gte,
+    #[regex("<")]
+    Lt,
+    #[regex("<=")]
+    Lte,
+    #[regex("==")]
+    EqEq,
+    #[regex("!")]
+    Bang,
+    #[regex("!=")]
+    NotEq,
+
+    #[regex("&")]
+    Ampersand,
+    #[regex("&&")]
+    AmpersandAmpersand,
+
+    #[regex("^")]
+    Carrot,
+
+    #[regex("\\|")]
+    Pipe,
+    #[regex("\\|\\|")]
+    PipePipe,
+
+    #[regex("<<")]
+    ShiftLeft,
+    #[regex(">>")]
+    ShiftRight,
+
+    #[regex("\\*=")]
+    TIMESEQ,
+    #[regex("/=")]
+    DIVEQ,
+    #[regex("%=")]
+    MODEQ,
+    #[regex("+=")]
+    PLUSEQ,
+    #[regex("-=")]
+    MINUSEQ,
+    #[regex("<<=")]
+    SHLEQ,
+    #[regex(">>=")]
+    SHREQ,
+    #[regex("&=")]
+    ANDEQ,
+    #[regex("^=")]
+    XOREQ,
+    #[regex("\\|=")]
+    OREQ,
 
     #[regex("\"[^\"]*\"", func = parse_string)]
     StrLit(&'a str),
