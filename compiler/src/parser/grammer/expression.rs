@@ -2,7 +2,7 @@ use lexer::LexerIterator;
 
 use crate::{
     lexer::{LexToken, MyLexerError},
-    parser::{Parse, ParserError, ParserInto, Result},
+    parser::{Parse, ParseIntoWith, ParserError, ParserInto, Result},
     trace,
 };
 
@@ -10,9 +10,8 @@ use super::Ident;
 
 #[derive(Debug)]
 pub enum Expression {
-    // TODO: Figure out how to do this nested shit
-    // BinaryOp(Box<Expression>, BinaryOperator, Box<Expression>),
-    // UnaryOp(Box<Expression>, UnaryOperator),
+    BinaryOp(Box<Expression>, BinaryOperator, Box<Expression>),
+    UnaryOp(UnaryOperator, Box<Expression>),
     Ident(Ident),
     Constant(Box<str>), // TODO: enrich this type / expand it with more stuff
 }
@@ -21,60 +20,132 @@ impl Parse for Expression {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
-        trace!("Entering Expression");
-        if let Ok(_) = token_stream.next_matches(LexToken::OParen) {
-            let expression: Expression = token_stream.parse()?;
-            token_stream.next_matches(LexToken::CParen)?;
-            return Ok(expression);
-        }
+        fn factor<'a>(
+            token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        ) -> Result<Expression> {
+            trace!("Entering factor");
 
-        let ident: Result<Ident> = token_stream.parse();
-        if let Ok(ident) = ident {
-            return Ok(Self::Ident(ident));
-        }
-
-        let constant = token_stream.next_matches_func(|x| {
-            use LexToken::*;
-            match x {
-                StrLit(x) | IntLit(x) | FloatLit(x) => Some(x.to_string().into_boxed_str()),
-                CharLit(x) => Some(format!("{}", x).into_boxed_str()),
-                _ => None,
+            if let Ok(_) = token_stream.next_matches(LexToken::OParen) {
+                let expression: Expression = token_stream.parse()?;
+                token_stream.next_matches(LexToken::CParen)?;
+                return Ok(expression);
             }
-        });
 
-        return Ok(Self::Constant(constant?));
+            let ident: Result<Ident> = token_stream.parse();
+            if let Ok(ident) = ident {
+                return Ok(Expression::Ident(ident));
+            }
+
+            let constant = token_stream.next_matches_func(|x| {
+                use LexToken::*;
+                match x {
+                    StrLit(x) | IntLit(x) | FloatLit(x) => Some(x.to_string().into_boxed_str()),
+                    CharLit(x) => Some(format!("{}", x).into_boxed_str()),
+                    _ => None,
+                }
+            });
+
+            return Ok(Expression::Constant(constant?));
+        }
+
+        fn term<'a>(
+            token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        ) -> Result<Expression> {
+            trace!("Entering term");
+
+            let mut expr = token_stream.parse_with(factor)?;
+
+            while let Ok((op, second)) = token_stream.parse_with(|token_stream| {
+                let meta = token_stream
+                    .clone()
+                    .next()
+                    .ok_or(ParserError::LexerError(
+                        lexer::LexerIteratorError::NoMoreTokens,
+                    ))??
+                    .meta;
+                let op: BinaryOperator = token_stream.parse()?;
+
+                match op {
+                    BinaryOperator::Div | BinaryOperator::Mult => {}
+                    _ => return Err(crate::parser::ParserError::DoesNotMatch(meta.into())),
+                };
+
+                let second = token_stream.parse_with(factor)?;
+
+                Ok((op, second))
+            }) {
+                expr = Expression::BinaryOp(Box::new(expr), op, Box::new(second));
+            }
+
+            Ok(expr)
+        }
+
+        trace!("Entering Expression");
+
+        let mut expr = token_stream.parse_with(term)?;
+
+        while let Ok((op, second)) = token_stream.parse_with(|token_stream| {
+            let meta = token_stream
+                .clone()
+                .next()
+                .ok_or(ParserError::LexerError(
+                    lexer::LexerIteratorError::NoMoreTokens,
+                ))??
+                .meta;
+            let op: BinaryOperator = token_stream.parse()?;
+
+            match op {
+                BinaryOperator::Add | BinaryOperator::Sub => {}
+                _ => return Err(crate::parser::ParserError::DoesNotMatch(meta.into())),
+            };
+
+            let second = token_stream.parse_with(term)?;
+
+            Ok((op, second))
+        }) {
+            expr = Expression::BinaryOp(Box::new(expr), op, Box::new(second));
+        }
+
+        Ok(expr)
     }
 }
 
 #[derive(Debug)]
 pub enum UnaryOperator {
-    Not,
+    Pos,
+    Neg,
+}
+
+impl<'a> TryFrom<&LexToken<'a>> for UnaryOperator {
+    type Error = ();
+
+    fn try_from(value: &LexToken<'a>) -> std::result::Result<Self, Self::Error> {
+        match value {
+            LexToken::Plus => Ok(Self::Pos),
+            LexToken::Minus => Ok(Self::Neg),
+            _ => Err(()),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub enum BinaryOperator {
-    EqEq,
+    Mult,
+    Div,
+    Add,
+    Sub,
 }
 
 impl<'a> TryFrom<&LexToken<'a>> for BinaryOperator {
-    type Error = ParserError<MyLexerError>;
+    type Error = ();
 
-    fn try_from(value: &LexToken<'a>) -> Result<Self> {
-        todo!()
-        // TODO: add this back in when ready
-        // match value {
-        //     LexToken::Eq => Ok(Self::Eq),
-        //     _ => Err(lexer::LexerIteratorError::DoesNotMatch.into()),
-        // }
-    }
-}
-
-impl Parse for BinaryOperator {
-    fn from_lexer<'a>(
-        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-    ) -> Result<Self> {
-        token_stream
-            .next_matches_func(|x| BinaryOperator::try_from(x).ok())
-            .map_err(|err| err.into())
+    fn try_from(value: &LexToken<'a>) -> std::result::Result<Self, ()> {
+        match value {
+            LexToken::Plus => Ok(Self::Add),
+            LexToken::Minus => Ok(Self::Sub),
+            LexToken::Mult => Ok(Self::Mult),
+            LexToken::Div => Ok(Self::Div),
+            _ => Err(()),
+        }
     }
 }

@@ -38,6 +38,15 @@ pub enum LexToken<'a> {
     #[regex(",")]
     Comma,
 
+    #[regex("+")]
+    Plus,
+    #[regex("-")]
+    Minus,
+    #[regex("/")]
+    Div,
+    #[regex("\\*")]
+    Mult,
+
     #[regex("\"[^\"]*\"", func = parse_string)]
     StrLit(&'a str),
     #[regex("[0-9][0-9]*\\.[0-9]*", func = parse_float)]

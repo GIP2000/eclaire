@@ -25,6 +25,34 @@ pub enum ParserError<E> {
 
 pub type Result<T> = std::result::Result<T, ParserError<MyLexerError>>;
 
+#[inline]
+pub fn safe_parse_wrapper<'a, I, O, F>(token_stream: &mut I, mut parser: F) -> Result<O>
+where
+    I: LexerIterator<'a, LexToken<'a>, MyLexerError>,
+    F: FnMut(&mut I) -> Result<O>,
+{
+    if let None | Some(Err(LexerIteratorError::NoMoreTokens)) = token_stream.clone().next() {
+        return Err(LexerIteratorError::NoMoreTokens.into());
+    };
+
+    let mut copy = token_stream.clone();
+
+    let result = parser(&mut copy).map_err(|err| match err {
+        ParserError::LexerError(lexer::LexerIteratorError::NoMoreTokens) => {
+            // TODO: make this better with an actual lineno and colno
+            ParserError::DoesNotMatch(ErrorMeta {
+                lineno: 0,
+                colno: 0,
+                display: "Unexpected EOF".into(),
+            })
+        }
+        err => err,
+    })?;
+
+    *token_stream = copy;
+    Ok(result)
+}
+
 trait Parse
 where
     Self: Sized,
@@ -36,27 +64,7 @@ where
     fn from_lexer_safe<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
     ) -> Result<Self> {
-        // Only say there is no more tokens if it starts with no more tokens
-        if let None | Some(Err(LexerIteratorError::NoMoreTokens)) = token_stream.clone().next() {
-            return Err(LexerIteratorError::NoMoreTokens.into());
-        };
-
-        let mut copy = token_stream.clone();
-        // Otherwise say that we Do not match if there is no more tokens
-        let result = Self::from_lexer(&mut copy).map_err(|err| match err {
-            ParserError::LexerError(lexer::LexerIteratorError::NoMoreTokens) => {
-                // TODO: make this better with an actual lineno and colno
-                ParserError::DoesNotMatch(ErrorMeta {
-                    lineno: 0,
-                    colno: 0,
-                    display: "Unexpected EOF".into(),
-                })
-            }
-            err => err,
-        })?;
-
-        *token_stream = copy;
-        Ok(result)
+        safe_parse_wrapper(token_stream, Self::from_lexer)
     }
 
     fn from_lexer_many<'a, 'b, I: LexerIterator<'a, LexToken<'a>, MyLexerError>>(
@@ -87,6 +95,20 @@ impl<'a, 'b, I: LexerIterator<'a, LexToken<'a>, MyLexerError>, T: Parse> std::it
     }
 }
 
+trait ParseIntoWith<'a>
+where
+    Self: LexerIterator<'a, LexToken<'a>, MyLexerError>,
+{
+    fn parse_with<Output>(
+        &mut self,
+        parser: impl FnMut(&mut Self) -> Result<Output>,
+    ) -> Result<Output> {
+        safe_parse_wrapper(self, parser)
+    }
+}
+
+impl<'a, I: LexerIterator<'a, LexToken<'a>, MyLexerError>> ParseIntoWith<'a> for I {}
+
 trait ParserInto<'a, Output: Parse>
 where
     Self: LexerIterator<'a, LexToken<'a>, MyLexerError>,
@@ -103,6 +125,16 @@ where
 impl<'a, Output: Parse, I: LexerIterator<'a, LexToken<'a>, MyLexerError>> ParserInto<'a, Output>
     for I
 {
+}
+
+impl<T: for<'c> TryFrom<&'c LexToken<'c>>> Parse for T {
+    fn from_lexer<'a>(
+        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+    ) -> Result<Self> {
+        token_stream
+            .next_matches_func(|x| T::try_from(x).ok())
+            .map_err(|err| err.into())
+    }
 }
 
 pub fn parse(source_code: &str) -> Result<TranslationUnit> {

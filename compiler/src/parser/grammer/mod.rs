@@ -4,7 +4,6 @@ use lexer::LexerIterator;
 
 use super::{Parse, Result};
 use crate::{
-    debug,
     lexer::{LexToken, MyLexerError},
     parser::{
         grammer::{

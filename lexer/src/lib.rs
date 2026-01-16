@@ -122,8 +122,6 @@ pub trait LexerIterator<'a, T: Debug + PartialEq, E: Debug>:
         let mut other = self.clone();
         let val = other.next().ok_or(LexerIteratorError::NoMoreTokens)??;
 
-        eprintln!("val = {val:?}");
-
         let result = closure(&val.data).ok_or(LexerIteratorError::DoesNotMatch(val.meta.into()))?;
         *self = other;
         Ok(result)
