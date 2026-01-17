@@ -1,5 +1,9 @@
 pub mod expression;
 pub mod ident;
+pub mod statment;
+pub mod structures;
+use std::collections::HashMap;
+
 use lexer::LexerIterator;
 
 use super::{Parse, Result};
@@ -7,9 +11,10 @@ use crate::{
     lexer::{LexToken, MyLexerError},
     parser::{
         grammer::{
-            expression::Expression,
             ident::{Ident, IdentPair},
+            statment::Statment,
         },
+        symbol_table::{self, SymbolTable, TypeInfo},
         ParserInto,
     },
     trace,
@@ -18,7 +23,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct TranslationUnit {
-    pub functions: Vec<Function>,
+    pub symbol_table: SymbolTable, // pub functions: Vec<Function>,
 }
 
 impl Parse for TranslationUnit {
@@ -27,9 +32,17 @@ impl Parse for TranslationUnit {
     ) -> Result<Self> {
         trace!("Entering TranslationUnit");
 
-        Ok(Self {
-            functions: token_stream.parse_many().collect::<Result<_>>()?,
-        })
+        let functions: HashMap<Ident, TypeInfo> = token_stream
+            .parse_many()
+            .map(|x: Result<Function>| x.map(|x| (x.name.clone(), x.into())))
+            .collect::<Result<_>>()?;
+
+        let symbol_table = SymbolTable {
+            type_defs: functions,
+            decls: HashMap::new(),
+        };
+
+        Ok(Self { symbol_table })
     }
 }
 
@@ -82,44 +95,5 @@ impl Parse for Function {
             ret,
             statments,
         })
-    }
-}
-
-#[derive(Debug)]
-pub enum Statment {
-    Assignment(Ident, Option<Ident>, Expression), // do I need the option? can I figure out the
-    // datatype always and replace this with an ident
-    // pair?
-    Expression(Expression),
-    // add loops
-    // add match
-}
-
-impl Parse for Statment {
-    fn from_lexer<'a>(
-        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-    ) -> Result<Self> {
-        trace!("Entering Statment");
-        let mut temp_token_stream = token_stream.clone();
-
-        let ident = temp_token_stream
-            .next_matches(LexToken::Let)
-            .ok()
-            .map(|_| -> Result<_> {
-                trace!("Entering Let Statment");
-                let result = temp_token_stream.parse()?;
-                temp_token_stream.next_matches(LexToken::Eq)?;
-                *token_stream = temp_token_stream;
-                Ok(result)
-            })
-            .transpose()?;
-
-        let expression: Expression = token_stream.parse()?;
-        token_stream.next_matches(LexToken::SemiColon)?;
-
-        match ident {
-            Some((ident, datatype)) => return Ok(Self::Assignment(ident, datatype, expression)),
-            None => Ok(Self::Expression(expression)),
-        }
     }
 }

@@ -31,6 +31,8 @@ pub enum LexToken<'a> {
     CBracket,
     #[regex("let")]
     Let,
+    #[regex("const")]
+    Const,
     #[regex("=")]
     Eq,
     #[regex(";")]
@@ -105,6 +107,13 @@ pub enum LexToken<'a> {
     XOREQ,
     #[regex("\\|=")]
     OREQ,
+
+    #[regex("struct")]
+    Struct,
+    #[regex("enum")]
+    Enum,
+    #[regex("primative")]
+    Primative,
 
     #[regex("\"[^\"]*\"", func = parse_string)]
     StrLit(&'a str),

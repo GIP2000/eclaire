@@ -2,7 +2,15 @@ use std::collections::HashMap;
 
 use thiserror::Error;
 
-use crate::{info, parser::grammer::ident::Ident, trace};
+use crate::{
+    info,
+    parser::grammer::{
+        ident::Ident,
+        structures::{Enum, Struct},
+        Function,
+    },
+    trace,
+};
 
 #[derive(Debug, Error)]
 pub enum SymbolTableError {
@@ -14,36 +22,37 @@ pub enum SymbolTableError {
 
 type Result<T> = std::result::Result<T, SymbolTableError>;
 
-#[derive(Debug, Clone)]
-pub struct TypeInfo;
+#[derive(Debug)]
+pub enum TypeDefInfoType {
+    Function(Function),
+    Struct(Struct),
+    Enum(Enum),
+    TypeDefPrim,
+    TypeDefAlias,
+}
+
+#[derive(Debug)]
+pub struct TypeInfo {
+    pub size_bits: usize,
+    pub type_info: TypeDefInfoType,
+}
+
+impl From<Function> for TypeInfo {
+    fn from(value: Function) -> Self {
+        Self {
+            size_bits: 0, // TODO: make this make more sense
+            type_info: TypeDefInfoType::Function(value),
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct SymbolTable {
-    parent: Option<Box<SymbolTable>>,
-    type_defs: HashMap<Ident, TypeInfo>,
-    decls: HashMap<Ident, TypeInfo>,
+    pub type_defs: HashMap<Ident, TypeInfo>,
+    pub decls: HashMap<Ident, Ident>,
 }
 
 impl SymbolTable {
-    pub fn pop(&mut self) -> Result<Self> {
-        trace!("Popping symbol table");
-        if let Some(parent) = self.parent.take() {
-            let old = std::mem::replace(self, *parent);
-            info!("Sybmol Table popped succesfully");
-            return Ok(old);
-        }
-
-        info!("Sybmol Table failed to pop");
-        return Err(SymbolTableError::PopRoot);
-    }
-
-    pub fn new_frame(&mut self) {
-        trace!("Making a new symbol table frame");
-
-        let old = std::mem::take(self);
-        self.parent = Some(Box::new(old));
-    }
-
     pub fn insert_type(&mut self, key: Ident, info: TypeInfo) -> Result<()> {
         trace!("Inserting into type_defs");
         info!("Inserting {key:?} with value {info:?} into type_defs");
@@ -57,12 +66,12 @@ impl SymbolTable {
             })
     }
 
-    pub fn insert_decl(&mut self, key: Ident, info: TypeInfo) -> Result<()> {
+    pub fn insert_decl(&mut self, key: Ident, type_name: Ident) -> Result<()> {
         trace!("Inserting into decl");
-        info!("Inserting {key:?} with value {info:?} into decls");
+        info!("Inserting {key:?} with value {type_name:?} into decls");
 
         self.decls
-            .try_insert(key.clone(), info)
+            .try_insert(key.clone(), type_name)
             .map(|_| ())
             .map_err(|_| {
                 info!("ident {key:?} already exists in decls");
@@ -73,36 +82,18 @@ impl SymbolTable {
     pub fn get_type(&self, key: &Ident) -> Option<&TypeInfo> {
         trace!("Getting type from symbol table");
         info!("Getting type of name {key:?}");
-        let mut table = Some(self);
+        self.type_defs.get(key)
+    }
 
-        while let Some(table_ref) = table {
-            if let Some(result) = table_ref.type_defs.get(key) {
-                info!("found type of name {key:?} -> {result:?}");
-                return Some(result);
-            }
-            table = table_ref.parent.as_ref().map(|x| x.as_ref());
-        }
-
-        info!("no type found for {key:?}");
-
-        None
+    pub fn get_decl_name(&self, key: &Ident) -> Option<&Ident> {
+        trace!("Getting a decl name from symbol table");
+        info!("Getting decl of name {key:?}");
+        self.decls.get(key)
     }
 
     pub fn get_decl(&self, key: &Ident) -> Option<&TypeInfo> {
-        trace!("Getting a decl from symbol table");
+        trace!("Getting a decl type from symbol table");
         info!("Getting decl of name {key:?}");
-        let mut table = Some(self);
-
-        while let Some(table_ref) = table {
-            if let Some(result) = table_ref.decls.get(key) {
-                info!("found decl of name {key:?} -> {result:?}");
-                return Some(result);
-            }
-            table = table_ref.parent.as_ref().map(|x| x.as_ref());
-        }
-
-        info!("no decl found for {key:?}");
-
-        None
+        self.decls.get(key).and_then(|name| self.get_type(name))
     }
 }
