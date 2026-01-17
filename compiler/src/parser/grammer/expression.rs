@@ -4,7 +4,7 @@ use crate::{
     lexer::{LexToken, MyLexerError},
     parser::{
         safe_parse_wrapper,
-        symbol_table::{self, SymbolTable},
+        symbol_table::SymbolTable,
         Parse, ParseIntoWith, ParserError, ParserInto, Result,
     },
     trace,

@@ -3,7 +3,7 @@ use lexer::LexerIterator;
 use crate::{
     lexer::{LexToken, MyLexerError},
     parser::{
-        grammer::{expression::Expression, ident::Ident, Function},
+        grammer::{expression::Expression, ident::Ident},
         symbol_table::SymbolTable,
         Parse, ParserInto, Result,
     },

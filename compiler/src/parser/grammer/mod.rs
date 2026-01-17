@@ -14,7 +14,7 @@ use crate::{
             ident::{Ident, IdentPair},
             statment::Statment,
         },
-        symbol_table::{self, SymbolTable, TypeInfo},
+        symbol_table::{SymbolTable, TypeInfo},
         ParserInto,
     },
     trace,
