@@ -6,7 +6,7 @@ use crate::{
     trace,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Ident {
     pub value: Box<str>,
 }

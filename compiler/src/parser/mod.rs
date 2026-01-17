@@ -2,6 +2,7 @@
 mod test;
 
 mod grammer;
+pub mod symbol_table;
 use std::marker::PhantomData;
 
 use grammer::TranslationUnit;

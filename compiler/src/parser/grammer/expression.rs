@@ -37,7 +37,6 @@ where
 
         Ok(token_stream
             .parse_with_many(|token_stream| {
-                // let mut parser = parser;
                 let meta = token_stream
                     .clone()
                     .next()
@@ -108,7 +107,6 @@ impl Expression {
                     LexToken::OParen => {
                         let IterPlusError(expr_list, following) = token_stream
                             .parse_with_many(|token_stream| {
-                                // this might not be right?
                                 let expr: Expression = token_stream.parse()?;
                                 _ = token_stream.next_matches(LexToken::Comma);
                                 Ok(expr)
