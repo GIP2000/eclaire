@@ -2,7 +2,11 @@ use lexer::LexerIterator;
 
 use crate::{
     lexer::{LexToken, MyLexerError},
-    parser::{safe_parse_wrapper, Parse, ParseIntoWith, ParserError, ParserInto, Result},
+    parser::{
+        safe_parse_wrapper,
+        symbol_table::{self, SymbolTable},
+        Parse, ParseIntoWith, ParserError, ParserInto, Result,
+    },
     trace,
     utils::iterator::IterPlusError,
 };
@@ -24,19 +28,19 @@ pub enum Expression {
 fn binary_op_fun_builder<'a, I, FParser, FCond>(
     parser: FParser,
     cond: FCond,
-) -> impl Fn(&mut I) -> Result<Expression>
+) -> impl Fn(&mut I, &mut SymbolTable) -> Result<Expression>
 where
     I: LexerIterator<'a, LexToken<'a>, MyLexerError>,
-    FParser: FnMut(&mut I) -> Result<Expression> + Clone,
+    FParser: FnMut(&mut I, &mut SymbolTable) -> Result<Expression> + Clone,
     FCond: Fn(&BinaryOperator) -> Option<()>,
 {
     #[inline(always)]
-    move |token_stream: &mut I| {
+    move |token_stream: &mut I, symbol_table: &mut SymbolTable| {
         let mut parser = parser.clone();
-        let expr = safe_parse_wrapper(token_stream, &mut parser)?;
+        let expr = safe_parse_wrapper(token_stream, symbol_table, &mut parser)?;
 
         Ok(token_stream
-            .parse_with_many(|token_stream| {
+            .parse_with_many(symbol_table, |token_stream, symbol_table| {
                 let meta = token_stream
                     .clone()
                     .next()
@@ -44,11 +48,11 @@ where
                         lexer::LexerIteratorError::NoMoreTokens,
                     ))??
                     .meta;
-                let op: BinaryOperator = token_stream.parse()?;
+                let op: BinaryOperator = token_stream.parse(symbol_table)?;
 
                 cond(&op).ok_or(ParserError::DoesNotMatch(meta.into()))?;
 
-                let second = safe_parse_wrapper(token_stream, &mut parser)?;
+                let second = safe_parse_wrapper(token_stream, symbol_table, &mut parser)?;
 
                 Ok((op, second))
             })
@@ -64,16 +68,17 @@ impl Expression {
 
     fn primary_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         trace!("Entering base expression");
 
         if let Ok(_) = token_stream.next_matches(LexToken::OParen) {
-            let expression: Expression = token_stream.parse()?;
+            let expression: Expression = token_stream.parse(symbol_table)?;
             token_stream.next_matches(LexToken::CParen)?;
             return Ok(expression);
         }
 
-        let ident: Result<Ident> = token_stream.parse();
+        let ident: Result<Ident> = token_stream.parse(symbol_table);
         if let Ok(ident) = ident {
             return Ok(Expression::Ident(ident));
         }
@@ -92,12 +97,13 @@ impl Expression {
 
     fn postfix_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         trace!("Entering Non Math Expression");
-        let expr = token_stream.parse_with(Self::primary_expression)?;
+        let expr = token_stream.parse_with(symbol_table, Self::primary_expression)?;
 
         Ok(token_stream
-            .parse_with_many(|token_stream| {
+            .parse_with_many(symbol_table, |token_stream, symbol_table| {
                 let token = token_stream.next_matches_func(|x| {
                     matches!(x, LexToken::OParen | LexToken::Dot | LexToken::OBracket)
                         .then_some(x.clone())
@@ -106,8 +112,8 @@ impl Expression {
                 let (op, second) = match token {
                     LexToken::OParen => {
                         let IterPlusError(expr_list, following) = token_stream
-                            .parse_with_many(|token_stream| {
-                                let expr: Expression = token_stream.parse()?;
+                            .parse_with_many(symbol_table, |token_stream, symbol_table| {
+                                let expr: Expression = token_stream.parse(symbol_table)?;
                                 _ = token_stream.next_matches(LexToken::Comma);
                                 Ok(expr)
                             })
@@ -120,11 +126,11 @@ impl Expression {
                         (BinaryOperator::Call, Expression::List(expr_list))
                     }
                     LexToken::Dot => {
-                        let ident: Ident = token_stream.parse()?;
+                        let ident: Ident = token_stream.parse(symbol_table)?;
                         (BinaryOperator::Select, Expression::Ident(ident))
                     }
                     LexToken::OBracket => {
-                        let expression: Expression = token_stream.parse()?;
+                        let expression: Expression = token_stream.parse(symbol_table)?;
                         token_stream.next_matches(LexToken::CBracket)?;
                         (BinaryOperator::ArrayIndex, expression)
                     }
@@ -139,10 +145,11 @@ impl Expression {
 
     fn unary_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
-        let op: Option<UnaryOperator> = token_stream.parse().ok();
+        let op: Option<UnaryOperator> = token_stream.parse(symbol_table).ok();
 
-        let expr = token_stream.parse_with(Self::postfix_expression)?;
+        let expr = token_stream.parse_with(symbol_table, Self::postfix_expression)?;
 
         Ok(match op {
             Some(x) => Expression::UnaryOp(x, Box::new(expr)),
@@ -152,17 +159,19 @@ impl Expression {
 
     fn multiplicative_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         trace!("Entering multiplicative expression");
         use BinaryOperator::*;
         binary_op_fun_builder(Self::unary_expression, |op| match op {
             Div | Mult | Mod => Some(()),
             _ => return None,
-        })(token_stream)
+        })(token_stream, symbol_table)
     }
 
     fn additive_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         trace!("Entering additive expression");
 
@@ -170,11 +179,12 @@ impl Expression {
         binary_op_fun_builder(Self::multiplicative_expression, |op| match op {
             Add | Sub => Some(()),
             _ => return None,
-        })(token_stream)
+        })(token_stream, symbol_table)
     }
 
     fn shift_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         trace!("Entering Shift Expression");
 
@@ -182,11 +192,12 @@ impl Expression {
         binary_op_fun_builder(Self::additive_expression, |op| match op {
             ShiftRight | ShiftLeft => Some(()),
             _ => return None,
-        })(token_stream)
+        })(token_stream, symbol_table)
     }
 
     fn relational_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         trace!("Entering Relational Expression");
 
@@ -194,11 +205,12 @@ impl Expression {
         binary_op_fun_builder(Self::shift_expression, |op| match op {
             Gt | Lt | Gte | Lte => Some(()),
             _ => return None,
-        })(token_stream)
+        })(token_stream, symbol_table)
     }
 
     fn equality_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         trace!("Entering Equality Expression");
 
@@ -206,11 +218,12 @@ impl Expression {
         binary_op_fun_builder(Self::relational_expression, |op| match op {
             BoolEq | NotEq => Some(()),
             _ => return None,
-        })(token_stream)
+        })(token_stream, symbol_table)
     }
 
     fn bin_and_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         trace!("Entering Binary And Expression");
 
@@ -218,11 +231,12 @@ impl Expression {
         binary_op_fun_builder(Self::equality_expression, |op| match op {
             BitAnd => Some(()),
             _ => return None,
-        })(token_stream)
+        })(token_stream, symbol_table)
     }
 
     fn xor_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         trace!("Entering Xor Expression");
 
@@ -230,11 +244,12 @@ impl Expression {
         binary_op_fun_builder(Self::bin_and_expression, |op| match op {
             Xor => Some(()),
             _ => return None,
-        })(token_stream)
+        })(token_stream, symbol_table)
     }
 
     fn bin_or_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         trace!("Entering Binary Or Expression");
 
@@ -242,11 +257,12 @@ impl Expression {
         binary_op_fun_builder(Self::xor_expression, |op| match op {
             BitOr => Some(()),
             _ => return None,
-        })(token_stream)
+        })(token_stream, symbol_table)
     }
 
     fn log_and_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         trace!("Entering Logical And Expression");
 
@@ -254,11 +270,12 @@ impl Expression {
         binary_op_fun_builder(Self::bin_or_expression, |op| match op {
             LogAnd => Some(()),
             _ => return None,
-        })(token_stream)
+        })(token_stream, symbol_table)
     }
 
     fn log_or_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         trace!("Entering Logical Or Expression");
 
@@ -266,15 +283,16 @@ impl Expression {
         binary_op_fun_builder(Self::log_and_expression, |op| match op {
             LogOr => Some(()),
             _ => return None,
-        })(token_stream)
+        })(token_stream, symbol_table)
     }
 
     fn assignment_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Expression> {
         token_stream
-            .parse_with(|token_stream| {
-                let unary = token_stream.parse_with(Self::unary_expression)?;
+            .parse_with(symbol_table, |token_stream, symbol_table| {
+                let unary = token_stream.parse_with(symbol_table, Self::unary_expression)?;
 
                 let meta = token_stream
                     .clone()
@@ -283,7 +301,7 @@ impl Expression {
                         lexer::LexerIteratorError::NoMoreTokens,
                     ))??
                     .meta;
-                let op: BinaryOperator = token_stream.parse()?;
+                let op: BinaryOperator = token_stream.parse(symbol_table)?;
 
                 use BinaryOperator::*;
                 match op {
@@ -292,20 +310,21 @@ impl Expression {
                     _ => return Err(ParserError::DoesNotMatch(meta.into())),
                 };
 
-                let second = token_stream.parse_with(Self::log_or_expression)?;
+                let second = token_stream.parse_with(symbol_table, Self::log_or_expression)?;
 
                 Ok(Expression::make_binary_op(unary, op, second))
             })
-            .or_else(|_| token_stream.parse_with(Self::log_or_expression))
+            .or_else(|_| token_stream.parse_with(symbol_table, Self::log_or_expression))
     }
 }
 
 impl Parse for Expression {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Self> {
         trace!("Entering Expression");
-        Self::assignment_expression(token_stream)
+        Self::assignment_expression(token_stream, symbol_table)
     }
 }
 

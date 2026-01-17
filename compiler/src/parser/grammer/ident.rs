@@ -2,7 +2,7 @@ use lexer::LexerIterator;
 
 use crate::{
     lexer::{LexToken, MyLexerError},
-    parser::{Parse, ParserInto, Result},
+    parser::{symbol_table::SymbolTable, Parse, ParserInto, Result},
     trace,
 };
 
@@ -23,6 +23,7 @@ where
 impl Parse for Ident {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        _: &mut SymbolTable,
     ) -> Result<Self> {
         trace!("Entering Ident");
         token_stream
@@ -48,11 +49,12 @@ pub struct IdentPair {
 impl Parse for IdentPair {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Self> {
         trace!("Entering Ident Pair");
-        let name = token_stream.parse()?;
+        let name = token_stream.parse(symbol_table)?;
         token_stream.next_matches(LexToken::Colon)?;
-        let datatype = token_stream.parse()?;
+        let datatype = token_stream.parse(symbol_table)?;
         _ = token_stream.next_matches(LexToken::Comma);
         Ok(Self { name, datatype })
     }
@@ -61,10 +63,11 @@ impl Parse for IdentPair {
 impl Parse for (Ident, Option<Ident>) {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Self> {
         token_stream
-            .parse()
+            .parse(symbol_table)
             .map(|x: IdentPair| (x.name, Some(x.datatype)))
-            .or_else(|_| token_stream.parse().map(|x: Ident| (x, None)))
+            .or_else(|_| token_stream.parse(symbol_table).map(|x: Ident| (x, None)))
     }
 }

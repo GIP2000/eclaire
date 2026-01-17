@@ -23,17 +23,18 @@ use crate::{
 
 #[derive(Debug)]
 pub struct TranslationUnit {
-    pub symbol_table: SymbolTable, // pub functions: Vec<Function>,
+    pub symbol_table: SymbolTable,
 }
 
 impl Parse for TranslationUnit {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Self> {
         trace!("Entering TranslationUnit");
 
         let functions: HashMap<Ident, TypeInfo> = token_stream
-            .parse_many()
+            .parse_many(symbol_table)
             .map(|x: Result<Function>| x.map(|x| (x.name.clone(), x.into())))
             .collect::<Result<_>>()?;
 
@@ -57,16 +58,17 @@ pub struct Function {
 impl Parse for Function {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
     ) -> Result<Self> {
         trace!("entering Function");
         token_stream.next_matches(LexToken::Fn)?;
 
-        let name: Ident = token_stream.parse()?;
+        let name: Ident = token_stream.parse(symbol_table)?;
 
         token_stream.next_matches(LexToken::OParen)?;
 
         let args = token_stream
-            .parse_many()
+            .parse_many(symbol_table)
             .take_while(|x| x.is_ok())
             .collect::<Result<_>>()
             .expect("Unreachable: only valid entries of ident pair");
@@ -76,14 +78,12 @@ impl Parse for Function {
         let ret: Option<Ident> = token_stream
             .next_matches(LexToken::SkinnyArrow)
             .ok()
-            .map(|_| token_stream.parse())
+            .map(|_| token_stream.parse(symbol_table))
             .transpose()?;
 
         token_stream.next_matches(LexToken::OCBracket)?;
 
-        let parse_iter = token_stream.parse_many();
-
-        let IterPlusError(statments, following) = parse_iter.collect();
+        let IterPlusError(statments, following) = token_stream.parse_many(symbol_table).collect();
 
         token_stream
             .next_matches(LexToken::CCBracket)
