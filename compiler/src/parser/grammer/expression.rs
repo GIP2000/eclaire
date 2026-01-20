@@ -3,6 +3,10 @@ use lexer::LexerIterator;
 use crate::{
     lexer::{LexToken, MyLexerError},
     parser::{
+        grammer::{
+            structures::{Enum, PrimativeType, Struct},
+            Function,
+        },
         safe_parse_wrapper,
         symbol_table::SymbolTable,
         Parse, ParseIntoWith, ParserError, ParserInto, Result,
@@ -13,7 +17,100 @@ use crate::{
 
 use super::Ident;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub enum TypeDefInfoType {
+    Function(Function),
+    Struct(Struct),
+    Enum(Enum),
+    TypeDefPrim(PrimativeType),
+    TypeDefAlias(Ident),
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeDef {
+    pub size_bits: usize,
+    pub type_info: TypeDefInfoType,
+}
+
+impl Parse for TypeDef {
+    fn from_lexer<'a>(
+        token_stream: &mut impl lexer::LexerIterator<
+            'a,
+            crate::lexer::LexToken<'a>,
+            crate::lexer::MyLexerError,
+        >,
+        symbol_table: &mut SymbolTable,
+    ) -> super::Result<Self> {
+        trace!("Entered TypeDef");
+        token_stream
+            .parse(symbol_table)
+            .map(|x: Function| Self {
+                size_bits: 0,
+                type_info: TypeDefInfoType::Function(x),
+            })
+            .or_else(|_| {
+                token_stream.parse(symbol_table).map(|x: Struct| Self {
+                    size_bits: 0,
+                    type_info: TypeDefInfoType::Struct(x),
+                })
+            })
+            .or_else(|_| {
+                token_stream.parse(symbol_table).map(|x: Enum| Self {
+                    size_bits: 0,
+                    type_info: TypeDefInfoType::Enum(x),
+                })
+            })
+            .or_else(|_| {
+                token_stream
+                    .parse(symbol_table)
+                    .map(|x: PrimativeType| Self {
+                        size_bits: 0,
+                        type_info: TypeDefInfoType::TypeDefPrim(x),
+                    })
+            })
+            .or_else(|_| {
+                token_stream.parse(symbol_table).map(|x: Ident| Self {
+                    size_bits: 0,
+                    type_info: TypeDefInfoType::TypeDefAlias(x),
+                })
+            })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ConstantExpression {
+    IntLit(Box<str>),
+    FloatLit(Box<str>),
+    StrLit(Box<str>),
+    CharLit(u8),
+    TypeLit(TypeDef),
+}
+
+impl Parse for ConstantExpression {
+    fn from_lexer<'a>(
+        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTable,
+    ) -> Result<Self> {
+        token_stream
+            .next_matches_func(|x| {
+                use LexToken::*;
+                match x {
+                    StrLit(x) => Some(Self::StrLit((*x).into())),
+                    IntLit(x) => Some(Self::IntLit((*x).into())),
+                    FloatLit(x) => Some(Self::FloatLit((*x).into())),
+                    CharLit(x) => Some(Self::CharLit(*x)),
+                    _ => None,
+                }
+            })
+            .or_else(|_| {
+                token_stream
+                    .parse(symbol_table)
+                    .map(|x: TypeDef| Self::TypeLit(x.into()))
+            })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Expression {
     BinaryOp(Box<Expression>, BinaryOperator, Box<Expression>),
     UnaryOp(UnaryOperator, Box<Expression>),
@@ -21,7 +118,7 @@ pub enum Expression {
     List(Vec<Expression>),
 
     Ident(Ident),
-    Constant(Box<str>), // TODO: enrich this type / expand it with more stuff
+    Constant(ConstantExpression),
 }
 
 #[inline(always)]
@@ -83,16 +180,9 @@ impl Expression {
             return Ok(Expression::Ident(ident));
         }
 
-        let constant = token_stream.next_matches_func(|x| {
-            use LexToken::*;
-            match x {
-                StrLit(x) | IntLit(x) | FloatLit(x) => Some(x.to_string().into_boxed_str()),
-                CharLit(x) => Some(format!("{}", x).into_boxed_str()),
-                _ => None,
-            }
-        });
+        let constant = token_stream.parse(symbol_table)?;
 
-        return Ok(Expression::Constant(constant?));
+        return Ok(Expression::Constant(constant));
     }
 
     fn postfix_expression<'a>(
@@ -328,7 +418,7 @@ impl Parse for Expression {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum UnaryOperator {
     Pos,
     Neg,
@@ -356,7 +446,7 @@ impl<'a> TryFrom<&LexToken<'a>> for UnaryOperator {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum BinaryOperator {
     // multiplicative
     Mult,

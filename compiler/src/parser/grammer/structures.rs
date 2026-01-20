@@ -27,7 +27,7 @@ pub trait GetSize {
     fn get_size(&self) -> usize;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Struct {
     pub fields: Vec<IdentPair>,
 }
@@ -51,7 +51,7 @@ impl Parse for Struct {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Enum {
     pub variants: Vec<(Ident, EnumVariantTypes)>,
 }
@@ -107,9 +107,84 @@ impl Parse for Enum {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum EnumVariantTypes {
     None,
     Tuple(Vec<Ident>),
     Struct(Vec<IdentPair>),
+}
+
+#[derive(Debug, Clone)]
+pub struct PrimativeType {
+    pub size: usize, // TODO play with this datatype size (should it just be a u16 or a u8?)
+    pub like: PrimativeLike,
+    pub is_default: bool, // Assert that there is only one of these ever declared in the program.
+}
+
+impl Parse for PrimativeType {
+    fn from_lexer<'a>(
+        token_stream: &mut impl lexer::LexerIterator<'a, LexToken<'a>, crate::lexer::MyLexerError>,
+        symbol_table: &mut SymbolTable,
+    ) -> Result<Self> {
+        token_stream.next_matches(LexToken::Primative)?;
+        token_stream.next_matches(LexToken::OParen)?;
+        let like: PrimativeLike = token_stream.parse(symbol_table)?;
+
+        token_stream.next_matches(LexToken::Comma)?;
+
+        let size = token_stream.next_matches_func(|x| match x {
+            LexToken::IntLit(x) => Some(x.parse::<usize>().expect("This should always work")),
+            _ => None,
+        })?;
+
+        if let PrimativeLike::Float = like {
+            if size != 32 && size != 64 {
+                // TODO: add a new error message for this specificlly
+                return Err(crate::parser::ParserError::Other);
+            }
+        }
+
+        let is_default = token_stream
+            .parse_with(symbol_table, |token_stream, _| {
+                token_stream.next_matches(LexToken::Comma)?;
+                let val = token_stream.next_matches_func(|x| match x {
+                    LexToken::BoolLit(x) => Some(*x),
+                    _ => None,
+                })?;
+                Ok(val)
+            })
+            .unwrap_or(false);
+
+        if is_default {
+            // TODO: add a check here to see if there is another is_default true that is already in
+            // the system for this data type.
+        }
+
+        token_stream.next_matches(LexToken::CParen)?;
+        Ok(Self {
+            size,
+            like,
+            is_default,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PrimativeLike {
+    SInt,
+    UInt,
+    Float,
+}
+
+impl<'a> TryFrom<&LexToken<'a>> for PrimativeLike {
+    type Error = ();
+
+    fn try_from(value: &LexToken<'a>) -> std::result::Result<Self, Self::Error> {
+        match value {
+            LexToken::Int => Ok(PrimativeLike::SInt),
+            LexToken::UInt => Ok(PrimativeLike::UInt),
+            LexToken::Float => Ok(PrimativeLike::Float),
+            _ => Err(()),
+        }
+    }
 }

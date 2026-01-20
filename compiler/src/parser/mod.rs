@@ -72,36 +72,30 @@ where
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
         symbol_table: &mut SymbolTable,
     ) -> Result<Self> {
-        safe_parse_wrapper(token_stream, symbol_table, &mut Self::from_lexer)
+        let result = safe_parse_wrapper(token_stream, symbol_table, &mut Self::from_lexer);
+
+        if let Err(err) = &result {
+            trace!("Error @ {err:?}");
+        }
+
+        result
     }
 
     fn from_lexer_many<'a, 'b, I: LexerIterator<'a, LexToken<'a>, MyLexerError>>(
         token_stream: &'b mut I,
         symbol_table: &'b mut SymbolTable,
-    ) -> ParseIter<'a, 'b, I, Self> {
-        ParseIter {
+    ) -> ParseIterWith<
+        'a,
+        'b,
+        I,
+        Self,
+        fn(token_stream: &mut I, symbol_table: &mut SymbolTable) -> Result<Self>,
+    > {
+        ParseIterWith {
             iter: token_stream,
+            func: Self::from_lexer_safe,
             symbol_table,
-            phantom_data: PhantomData,
-        }
-    }
-}
-
-struct ParseIter<'a, 'b, I: LexerIterator<'a, LexToken<'a>, MyLexerError>, O: Parse> {
-    iter: &'b mut I,
-    symbol_table: &'b mut SymbolTable,
-    phantom_data: PhantomData<&'a O>,
-}
-
-impl<'a, 'b, I: LexerIterator<'a, LexToken<'a>, MyLexerError>, T: Parse> std::iter::Iterator
-    for ParseIter<'a, 'b, I, T>
-{
-    type Item = Result<T>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match T::from_lexer_safe(self.iter, self.symbol_table) {
-            Err(ParserError::LexerError(LexerIteratorError::NoMoreTokens)) => None,
-            x @ Ok(_) | x @ Err(_) => Some(x),
+            phaton_data: PhantomData,
         }
     }
 }
@@ -117,7 +111,13 @@ where
     fn parse_many<'b>(
         &'b mut self,
         symbol_table: &'b mut SymbolTable,
-    ) -> ParseIter<'a, 'b, Self, Output> {
+    ) -> ParseIterWith<
+        'a,
+        'b,
+        Self,
+        Output,
+        fn(token_stream: &mut Self, symbol_table: &mut SymbolTable) -> Result<Output>,
+    > {
         Output::from_lexer_many(self, symbol_table)
     }
 }
@@ -197,11 +197,11 @@ where
 
 impl<'a, I: LexerIterator<'a, LexToken<'a>, MyLexerError>> ParseIntoWith<'a> for I {}
 
-pub fn parse(source_code: &str) -> Result<TranslationUnit> {
+pub fn parse(source_code: &str) -> Result<(TranslationUnit, SymbolTable)> {
     let mut lexer = LexToken::lex(source_code);
     trace!("starting parse");
     let mut symbol_table = SymbolTable::default();
     let result = lexer.parse(&mut symbol_table);
     trace!("finished parse");
-    result
+    Ok((result?, symbol_table))
 }

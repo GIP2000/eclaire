@@ -113,10 +113,11 @@ fn main() -> anyhow::Result<()> {
     info!("source code = {}", source_code);
 
     let ast = match parse(&source_code) {
-        Ok(x) => {
+        Ok((ast, table)) => {
             all!("Finished succesfully");
-            info!("AST: {x:?}");
-            x
+            info!("AST: {ast:?}");
+            info!("symbol table: {table:?}");
+            (ast, table)
         }
         Err(x) => {
             fatal!("Error making program {}", x);

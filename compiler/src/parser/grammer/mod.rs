@@ -1,8 +1,8 @@
+pub mod assignment;
 pub mod expression;
 pub mod ident;
 pub mod statment;
 pub mod structures;
-use std::collections::HashMap;
 
 use lexer::LexerIterator;
 
@@ -11,10 +11,11 @@ use crate::{
     lexer::{LexToken, MyLexerError},
     parser::{
         grammer::{
+            assignment::{Assignment, AssignmentType},
             ident::{Ident, IdentPair},
             statment::Statment,
         },
-        symbol_table::{SymbolTable, TypeInfo},
+        symbol_table::SymbolTable,
         ParserInto,
     },
     trace,
@@ -22,37 +23,41 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct TranslationUnit {
-    pub symbol_table: SymbolTable,
-}
+pub struct TranslationUnit(pub Vec<Assignment>);
 
 impl Parse for TranslationUnit {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
         symbol_table: &mut SymbolTable,
     ) -> Result<Self> {
-        trace!("Entering TranslationUnit");
-
-        let functions: HashMap<Ident, TypeInfo> = token_stream
+        let IterPlusError(result, following): IterPlusError<Vec<_>> = token_stream
             .parse_many(symbol_table)
-            .map(|x: Result<Function>| x.map(|x| (x.name.clone(), x.into())))
-            .collect::<Result<_>>()?;
+            .map(|x| match x {
+                x @ Err(_)
+                | x @ Ok(Assignment {
+                    assignment_type: AssignmentType::Const,
+                    ident: _,
+                    data_type: _,
+                    expr: _,
+                }) => x,
+                _ => Err(super::ParserError::Other),
+            })
+            .collect();
 
-        let symbol_table = SymbolTable {
-            type_defs: functions,
-            decls: HashMap::new(),
-        };
+        if let Some(following) = following {
+            return Err(following);
+        }
 
-        Ok(Self { symbol_table })
+        Ok(Self(result)) // Is this neccisary
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
-    pub name: Ident,
     pub args: Vec<IdentPair>,
     pub ret: Option<Ident>,
     pub statments: Vec<Statment>,
+    pub symbol_table_idx: usize,
 }
 
 impl Parse for Function {
@@ -61,9 +66,8 @@ impl Parse for Function {
         symbol_table: &mut SymbolTable,
     ) -> Result<Self> {
         trace!("entering Function");
-        token_stream.next_matches(LexToken::Fn)?;
 
-        let name: Ident = token_stream.parse(symbol_table)?;
+        token_stream.next_matches(LexToken::Fn)?;
 
         token_stream.next_matches(LexToken::OParen)?;
 
@@ -83,17 +87,23 @@ impl Parse for Function {
 
         token_stream.next_matches(LexToken::OCBracket)?;
 
+        let symbol_table_idx = symbol_table.push();
+
         let IterPlusError(statments, following) = token_stream.parse_many(symbol_table).collect();
+
+        symbol_table
+            .pop()
+            .expect("I just pushed this should never happen");
 
         token_stream
             .next_matches(LexToken::CCBracket)
             .map_err(|err| following.unwrap_or(err.into()))?;
 
         Ok(Self {
-            name,
             args,
             ret,
             statments,
+            symbol_table_idx,
         })
     }
 }

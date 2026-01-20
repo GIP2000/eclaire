@@ -3,16 +3,16 @@ use lexer::LexerIterator;
 use crate::{
     lexer::{LexToken, MyLexerError},
     parser::{
-        grammer::{expression::Expression, ident::Ident},
+        grammer::{assignment::Assignment, expression::Expression},
         symbol_table::SymbolTable,
         Parse, ParserInto, Result,
     },
     trace,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Statment {
-    Assignment(Ident, Option<Ident>, Expression),
+    Assignment(Assignment),
     Expression(Expression),
 }
 
@@ -22,26 +22,20 @@ impl Parse for Statment {
         symbol_table: &mut SymbolTable,
     ) -> Result<Self> {
         trace!("Entering Statment");
-        let mut temp_token_stream = token_stream.clone();
 
-        let ident = temp_token_stream
-            .next_matches(LexToken::Let)
-            .ok()
-            .map(|_| -> Result<_> {
-                trace!("Entering Let Statment");
-                let result = temp_token_stream.parse(symbol_table)?;
-                temp_token_stream.next_matches(LexToken::Eq)?;
-                *token_stream = temp_token_stream;
-                Ok(result)
+        token_stream
+            .parse(symbol_table)
+            .map(|x| Self::Assignment(x))
+            .or_else(|_| {
+                token_stream
+                    .parse(symbol_table)
+                    .map(|x| Self::Expression(x))
+                    .and_then(|x| {
+                        token_stream
+                            .next_matches(LexToken::SemiColon)
+                            .map_err(|err| err.into())
+                            .map(|_| x)
+                    })
             })
-            .transpose()?;
-
-        let expression: Expression = token_stream.parse(symbol_table)?;
-        token_stream.next_matches(LexToken::SemiColon)?;
-
-        match ident {
-            Some((ident, datatype)) => return Ok(Self::Assignment(ident, datatype, expression)),
-            None => Ok(Self::Expression(expression)),
-        }
     }
 }

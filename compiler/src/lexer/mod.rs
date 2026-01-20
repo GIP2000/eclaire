@@ -5,6 +5,8 @@ use crate::{info, trace};
 use lexer::LexerOutput;
 use proc_lexer::Lexer;
 
+use std::str::FromStr;
+
 pub type MyLexerError = anyhow::Error;
 type Result<T> = std::result::Result<T, MyLexerError>;
 
@@ -33,15 +35,23 @@ pub enum LexToken<'a> {
     Let,
     #[regex("const")]
     Const,
+    #[regex("mut")]
+    Mut,
     #[regex("=")]
     Eq,
     #[regex(";")]
     SemiColon,
     #[regex(",")]
     Comma,
-
     #[regex("\\.")]
     Dot,
+
+    #[regex("int")]
+    Int,
+    #[regex("uint")]
+    UInt,
+    #[regex("Float")]
+    Float,
 
     #[regex("+")]
     Plus,
@@ -115,6 +125,10 @@ pub enum LexToken<'a> {
     #[regex("primative")]
     Primative,
 
+    #[regex("true", func = parse_bool)]
+    #[regex("false", func = parse_bool)]
+    BoolLit(bool),
+
     #[regex("\"[^\"]*\"", func = parse_string)]
     StrLit(&'a str),
     #[regex("[0-9][0-9]*\\.[0-9]*", func = parse_float)]
@@ -139,12 +153,15 @@ impl<'a> LexToken<'a> {
                 data: LexToken::Skip,
             }) => false,
             x => {
-                trace!("lexed a token");
                 info!("token found: {:?}", x);
                 true
             }
         })
     }
+}
+
+fn parse_bool<'a>(x: &'a str) -> Result<LexToken<'a>> {
+    Ok(LexToken::BoolLit(bool::from_str(x).expect("")))
 }
 
 fn parse_string<'a>(x: &'a str) -> Result<LexToken<'a>> {

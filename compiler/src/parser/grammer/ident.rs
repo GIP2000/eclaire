@@ -40,7 +40,7 @@ impl Parse for Ident {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IdentPair {
     pub name: Ident,
     pub datatype: Ident,
