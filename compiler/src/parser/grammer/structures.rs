@@ -26,10 +26,6 @@ pub fn block_list<'a>(
     Ok(result)
 }
 
-pub trait GetSize {
-    fn get_size(&self) -> usize;
-}
-
 #[derive(Debug, Clone)]
 pub struct Struct {
     pub fields: Vec<IdentPair>,
@@ -46,12 +42,6 @@ impl CompareTypes for Struct {
 
                 field_a.name == field_b.name && datatype_a.are_types_eq(&datatype_b, type_defs)
             })
-    }
-}
-
-impl GetSize for Struct {
-    fn get_size(&self) -> usize {
-        0
     }
 }
 
