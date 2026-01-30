@@ -2,13 +2,24 @@ use lexer::LexerIterator;
 
 use crate::{
     lexer::{LexToken, MyLexerError},
-    parser::{symbol_table::SymbolTable, Parse, ParserInto, Result},
+    parser::{symbol_table::SymbolTableType, Parse, ParserInto, Result},
     trace,
 };
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Ident {
     pub value: Box<str>,
+}
+
+impl<A> From<A> for Ident
+where
+    A: AsRef<str>,
+{
+    fn from(value: A) -> Self {
+        Ident {
+            value: value.as_ref().into(),
+        }
+    }
 }
 
 impl<A> PartialEq<A> for Ident
@@ -23,7 +34,7 @@ where
 impl Parse for Ident {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        _: &mut SymbolTable,
+        _: &mut SymbolTableType,
     ) -> Result<Self> {
         trace!("Entering Ident");
         token_stream
@@ -40,7 +51,7 @@ impl Parse for Ident {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IdentPair {
     pub name: Ident,
     pub datatype: Ident,
@@ -49,7 +60,7 @@ pub struct IdentPair {
 impl Parse for IdentPair {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        symbol_table: &mut SymbolTable,
+        symbol_table: &mut SymbolTableType,
     ) -> Result<Self> {
         trace!("Entering Ident Pair");
         let name = token_stream.parse(symbol_table)?;
@@ -63,7 +74,7 @@ impl Parse for IdentPair {
 impl Parse for (Ident, Option<Ident>) {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        symbol_table: &mut SymbolTable,
+        symbol_table: &mut SymbolTableType,
     ) -> Result<Self> {
         token_stream
             .parse(symbol_table)

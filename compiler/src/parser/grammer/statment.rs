@@ -4,7 +4,7 @@ use crate::{
     lexer::{LexToken, MyLexerError},
     parser::{
         grammer::{assignment::Assignment, expression::Expression},
-        symbol_table::SymbolTable,
+        symbol_table::SymbolTableType,
         Parse, ParserInto, Result,
     },
     trace,
@@ -19,7 +19,7 @@ pub enum Statment {
 impl Parse for Statment {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        symbol_table: &mut SymbolTable,
+        symbol_table: &mut SymbolTableType,
     ) -> Result<Self> {
         trace!("Entering Statment");
 

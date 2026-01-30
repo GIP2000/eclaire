@@ -126,7 +126,7 @@ impl PartialEq<Level> for u8 {
 #[macro_export]
 macro_rules! log {
     ($level: expr, $($arg:tt)*) => {
-        $crate::utils::logger::log($level, format_args!($($arg)*))
+        $crate::utils::logger::log($level, file!(), line!(), format_args!($($arg)*))
     };
 }
 
@@ -180,7 +180,7 @@ macro_rules! fatal{
     }
 
 #[inline]
-pub fn log(level: Level, args: std::fmt::Arguments) {
+pub fn log(level: Level, file: &str, line: u32, args: std::fmt::Arguments) {
     #[cfg(not(test))]
     {
         let allowed_log = LOG_LEVEL.get().expect("ERROR UNITILIZED LOG LEVEL");
@@ -188,8 +188,8 @@ pub fn log(level: Level, args: std::fmt::Arguments) {
         if (*allowed_log & level) <= 0 {
             return;
         };
-        println!("{} {}", level, args);
+        println!("{} [{}:{}]: {}", level, file, line, args);
     }
     #[cfg(test)]
-    eprintln!("{} {}", level, args);
+    eprintln!("{} [{}:{}]: {}", level, file, line, args);
 }

@@ -1,8 +1,86 @@
-use crate::parser::grammer::expression::{
-    ConstantExpression, Expression, TypeDef, TypeDefInfoType,
-};
+use crate::parser::grammer::expression::{TypeDef, TypeDefInfoType};
 
 use super::*;
+
+#[test]
+fn test_type_checking_wrong() {
+    let table = parse(
+        "
+        const i32 = primative(int, 32, true);
+        const u32 = primative(uint, 32, false);
+
+        const f32 = primative(float, 32, true);
+        const f64 = primative(float, 64, false);
+
+        const structFoo = struct {
+            a_i32: i32,
+            b_u32: u32,
+            c_f32: f32
+            c_f64: f64
+
+        };
+
+        const structBar = struct {
+            foo: structFoo,
+            number: u32,
+        };
+
+        const foo = fn() {
+            let x = 1;
+            let x2: u32 = 32;
+
+            let foo = x + x2;
+
+
+        };
+        ",
+    )
+    .expect("Should be vaild");
+
+    table.type_check().expect_err("invalid types");
+}
+
+#[test]
+fn test_type_checking() {
+    let table = parse(
+        "
+        const i32 = primative(int, 32, true);
+        const u32 = primative(uint, 32, false);
+
+        const f32 = primative(float, 32, true);
+        const f64 = primative(float, 64, false);
+
+        const structFoo = struct {
+            a_i32: i32,
+            b_u32: u32,
+            c_f32: f32
+            c_f64: f64
+
+        };
+
+        const structBar = struct {
+            foo: structFoo,
+            number: u32,
+        };
+
+        const foo = fn() {
+            let x = 1;
+            let x2: u32 = 32;
+            let f = 1.;
+            let f2: f64 = 1.;
+
+            let foo = x + 1;
+            let bar = foo + x;
+
+            let s: structFoo;
+
+        };
+        ",
+    )
+    .expect("is valid");
+
+    table.type_check().expect("type's are valid");
+}
 
 #[test]
 fn test_typing() {
@@ -15,20 +93,17 @@ fn test_typing() {
         const f64 = primative(float, 64, false);
 
         const foo = fn() {
-
             let x = 1;
             let x2: u32 = 32;
             let f = 1.;
             let f2: f64 = 1.;
 
-        }
+        };
         ",
     )
     .expect("is valid");
 
-    eprint!("val = {:?}", val);
-
-    assert!(false);
+    eprintln!("val = {:?}", val);
 }
 
 #[test]
@@ -68,22 +143,19 @@ fn test_function_syntax() {
 
     eprintln!("val: {val:?}");
 
-    let (val, _) = val.expect("is valid");
+    let table = val.expect("is valid");
 
-    assert_eq!(val.0.len(), 2);
+    assert_eq!(table.len(), 2);
 
     // first
 
-    assert_eq!(val.0[0].ident, "foo");
-
-    let func = match &val.0[0].expr {
-        Some(Expression::Constant(ConstantExpression::TypeLit(TypeDef {
+    let func = match table.get(&"foo".into()) {
+        Some(TypeDef {
             size_bits: _,
             type_info: TypeDefInfoType::Function(func),
-        }))) => func,
+        }) => func,
         _ => {
-            assert!(false, "const foo is not a function");
-            unreachable!("")
+            panic!("couldn't find foo as a function");
         }
     };
 
@@ -96,19 +168,12 @@ fn test_function_syntax() {
 
     assert_eq!((func.ret.as_ref()).expect(""), &"foo");
 
-    // second
-
-    assert_eq!(val.0[1].ident, "foo2");
-
-    let func = match &val.0[1].expr {
-        Some(Expression::Constant(ConstantExpression::TypeLit(TypeDef {
+    let func = match table.get(&"foo2".into()) {
+        Some(TypeDef {
             size_bits: _,
             type_info: TypeDefInfoType::Function(func),
-        }))) => func,
-        _ => {
-            assert!(false, "const foo is not a function");
-            unreachable!("")
-        }
+        }) => func,
+        _ => panic!("couldn't find foo2 as a function"),
     };
 
     assert_eq!(func.args[0].name, "a");

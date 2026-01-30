@@ -1,8 +1,11 @@
 use crate::{
     lexer::LexToken,
     parser::{
-        grammer::ident::{Ident, IdentPair},
-        symbol_table::SymbolTable,
+        grammer::{
+            expression::TypeResp,
+            ident::{Ident, IdentPair},
+        },
+        symbol_table::{CompareTypes, SymbolTableType, SymbolTableTypePair},
         Parse, ParseIntoWith, ParserInto, Result,
     },
     utils::iterator::IterPlusError,
@@ -10,7 +13,7 @@ use crate::{
 
 pub fn block_list<'a>(
     token_stream: &mut impl lexer::LexerIterator<'a, LexToken<'a>, anyhow::Error>,
-    symbol_table: &mut SymbolTable,
+    symbol_table: &mut SymbolTableType,
 ) -> Result<Vec<IdentPair>> {
     token_stream.next_matches(LexToken::OCBracket)?;
 
@@ -32,6 +35,20 @@ pub struct Struct {
     pub fields: Vec<IdentPair>,
 }
 
+impl CompareTypes for Struct {
+    fn are_types_eq(&self, other: &Self, type_defs: (&SymbolTableType, usize)) -> bool {
+        self.fields
+            .iter()
+            .zip(other.fields.iter())
+            .all(|(field_a, field_b)| {
+                let datatype_a = type_defs.get_until_root(&field_a.datatype);
+                let datatype_b = type_defs.get_until_root(&field_b.datatype);
+
+                field_a.name == field_b.name && datatype_a.are_types_eq(&datatype_b, type_defs)
+            })
+    }
+}
+
 impl GetSize for Struct {
     fn get_size(&self) -> usize {
         0
@@ -41,7 +58,7 @@ impl GetSize for Struct {
 impl Parse for Struct {
     fn from_lexer<'a>(
         token_stream: &mut impl lexer::LexerIterator<'a, LexToken<'a>, anyhow::Error>,
-        symbol_table: &mut SymbolTable,
+        symbol_table: &mut SymbolTableType,
     ) -> Result<Self> {
         token_stream.next_matches(LexToken::Struct)?;
 
@@ -56,10 +73,43 @@ pub struct Enum {
     pub variants: Vec<(Ident, EnumVariantTypes)>,
 }
 
+impl CompareTypes for Enum {
+    fn are_types_eq(&self, other: &Self, type_defs: (&SymbolTableType, usize)) -> bool {
+        self.variants.iter().zip(other.variants.iter()).all(
+            |((ident_a, variant_type_a), (ident_b, variant_type_b))| {
+                if ident_a != ident_b {
+                    return false;
+                }
+
+                use EnumVariantTypes::*;
+
+                match (variant_type_a, variant_type_b) {
+                    (Tuple(t1), Tuple(t2)) => t1.iter().zip(t2.iter()).all(|(type_a, type_b)| {
+                        let datatype_a = type_defs.get_until_root(type_a);
+                        let datatype_b = type_defs.get_until_root(type_b);
+                        datatype_a.are_types_eq(&datatype_b, type_defs)
+                    }),
+                    (Struct(s1), Struct(s2)) => s1.iter().zip(s2.iter()).all(|(a, b)| {
+                        if a.name != b.name {
+                            return false;
+                        }
+                        let datatype_a = type_defs.get_until_root(&a.datatype);
+                        let datatype_b = type_defs.get_until_root(&b.datatype);
+
+                        datatype_a.are_types_eq(&datatype_b, type_defs)
+                    }),
+                    (None, None) => true,
+                    _ => false,
+                }
+            },
+        )
+    }
+}
+
 impl Parse for Enum {
     fn from_lexer<'a>(
         token_stream: &mut impl lexer::LexerIterator<'a, LexToken<'a>, crate::lexer::MyLexerError>,
-        symbol_table: &mut SymbolTable,
+        symbol_table: &mut SymbolTableType,
     ) -> Result<Self> {
         token_stream.next_matches(LexToken::Enum)?;
         token_stream.next_matches(LexToken::OCBracket)?;
@@ -121,10 +171,16 @@ pub struct PrimativeType {
     pub is_default: bool, // Assert that there is only one of these ever declared in the program.
 }
 
+impl PartialEq<PrimativeType> for PrimativeType {
+    fn eq(&self, other: &PrimativeType) -> bool {
+        self.size == other.size && self.like == other.like
+    }
+}
+
 impl Parse for PrimativeType {
     fn from_lexer<'a>(
         token_stream: &mut impl lexer::LexerIterator<'a, LexToken<'a>, crate::lexer::MyLexerError>,
-        symbol_table: &mut SymbolTable,
+        symbol_table: &mut SymbolTableType,
     ) -> Result<Self> {
         token_stream.next_matches(LexToken::Primative)?;
         token_stream.next_matches(LexToken::OParen)?;
@@ -155,9 +211,19 @@ impl Parse for PrimativeType {
             })
             .unwrap_or(false);
 
-        if is_default {
-            // TODO: add a check here to see if there is another is_default true that is already in
-            // the system for this data type.
+        match (is_default, like) {
+            (true, PrimativeLike::SInt) => {
+                if symbol_table.default_int.is_some() {
+                    return Err(crate::parser::ParserError::Other);
+                }
+            }
+            (true, PrimativeLike::Float) => {
+                if symbol_table.default_float.is_some() {
+                    return Err(crate::parser::ParserError::Other);
+                }
+            }
+            (true, PrimativeLike::UInt) => unimplemented!("does this make sense?"),
+            (false, _) => {}
         }
 
         token_stream.next_matches(LexToken::CParen)?;
@@ -169,11 +235,20 @@ impl Parse for PrimativeType {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PrimativeLike {
     SInt,
     UInt,
     Float,
+}
+
+impl From<PrimativeLike> for TypeResp {
+    fn from(value: PrimativeLike) -> Self {
+        match value {
+            PrimativeLike::UInt | PrimativeLike::SInt => TypeResp::IntLike,
+            PrimativeLike::Float => TypeResp::FloatLike,
+        }
+    }
 }
 
 impl<'a> TryFrom<&LexToken<'a>> for PrimativeLike {

@@ -15,7 +15,7 @@ use crate::{
             ident::{Ident, IdentPair},
             statment::Statment,
         },
-        symbol_table::SymbolTable,
+        symbol_table::SymbolTableType,
         ParserInto,
     },
     trace,
@@ -23,14 +23,14 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct TranslationUnit(pub Vec<Assignment>);
+pub struct TranslationUnit;
 
 impl Parse for TranslationUnit {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        symbol_table: &mut SymbolTable,
+        symbol_table: &mut SymbolTableType,
     ) -> Result<Self> {
-        let IterPlusError(result, following): IterPlusError<Vec<_>> = token_stream
+        let IterPlusError(_, following): IterPlusError<Vec<_>> = token_stream
             .parse_many(symbol_table)
             .map(|x| match x {
                 x @ Err(_)
@@ -48,7 +48,7 @@ impl Parse for TranslationUnit {
             return Err(following);
         }
 
-        Ok(Self(result)) // Is this neccisary
+        Ok(Self)
     }
 }
 
@@ -63,7 +63,7 @@ pub struct Function {
 impl Parse for Function {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        symbol_table: &mut SymbolTable,
+        symbol_table: &mut SymbolTableType,
     ) -> Result<Self> {
         trace!("entering Function");
 

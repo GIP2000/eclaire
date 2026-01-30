@@ -50,7 +50,7 @@ pub enum LexToken<'a> {
     Int,
     #[regex("uint")]
     UInt,
-    #[regex("Float")]
+    #[regex("float")]
     Float,
 
     #[regex("+")]

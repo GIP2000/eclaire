@@ -1,14 +1,12 @@
-use lexer::LexerIterator;
-
 use crate::{
-    debug,
-    lexer::{LexToken, MyLexerError},
+    lexer::LexToken,
     parser::{
         grammer::{
-            expression::{ConstantExpression, Expression, TypeDef},
+            expression::{ConstantExpression, Expression, TypeDefInfoType},
             ident::Ident,
+            structures::PrimativeLike,
         },
-        symbol_table::SymbolTable,
+        symbol_table::SymbolTableType,
         Parse, ParseIntoWith, ParserError, ParserInto, Result,
     },
     trace,
@@ -27,7 +25,7 @@ impl Parse for AssignmentType {
             crate::lexer::LexToken<'a>,
             crate::lexer::MyLexerError,
         >,
-        symbol_table: &mut SymbolTable,
+        symbol_table: &mut SymbolTableType,
     ) -> Result<Self> {
         token_stream
             .parse_with(symbol_table, |token_stream, _| {
@@ -51,6 +49,17 @@ pub struct Assignment {
     pub expr: Option<Expression>,
 }
 
+impl Assignment {
+    pub fn is_const(&self) -> bool {
+        use AssignmentType::*;
+
+        match self.assignment_type {
+            Const => true,
+            Let(_) => false,
+        }
+    }
+}
+
 impl Parse for Assignment {
     fn from_lexer<'a>(
         token_stream: &mut impl lexer::LexerIterator<
@@ -58,7 +67,7 @@ impl Parse for Assignment {
             crate::lexer::LexToken<'a>,
             crate::lexer::MyLexerError,
         >,
-        symbol_table: &mut SymbolTable,
+        symbol_table: &mut SymbolTableType,
     ) -> Result<Self> {
         trace!("Entered Assignment");
 
@@ -75,15 +84,35 @@ impl Parse for Assignment {
         use AssignmentType::*;
 
         match (&assignment_type, expr.as_ref()) {
-            (Let(_), Some(Expression::Constant(_)))
-            | (Const, None)
-            | (Const, Some(Expression::List(_))) => return Err(ParserError::Other),
+            (
+                Let(_),
+                Some(Expression::List(_) | Expression::Constant(ConstantExpression::TypeLit(_))),
+            )
+            | (Const, None | Some(Expression::List(_))) => return Err(ParserError::Other),
+
             (Let(_), _) => {}
             (Const, Some(Expression::Constant(ConstantExpression::TypeLit(type_data)))) => {
+                match &type_data.type_info {
+                    TypeDefInfoType::TypeDefPrim(primative_type) if primative_type.is_default => {
+                        match primative_type.like {
+                            PrimativeLike::SInt => {
+                                assert!(symbol_table.default_int.is_none(), "I checked earlier");
+
+                                symbol_table.default_int = Some(ident.clone());
+                            }
+                            PrimativeLike::UInt => unreachable!("I should error earlier than this"),
+                            PrimativeLike::Float => {
+                                assert!(symbol_table.default_float.is_none(), "I checked earlier");
+
+                                symbol_table.default_float = Some(ident.clone());
+                            }
+                        }
+                    }
+                    _ => {}
+                };
                 symbol_table
-                    .insert_type(ident.clone(), type_data.clone())
+                    .insert(ident.clone(), type_data.clone())
                     .map_err(|_| ParserError::Other)?;
-                // TODO: ensure datatype = a type value;
             }
             (Const, Some(_)) => unimplemented!(),
         }

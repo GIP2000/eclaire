@@ -112,18 +112,22 @@ fn main() -> anyhow::Result<()> {
     trace!("Finished reading source code");
     info!("source code = {}", source_code);
 
-    let ast = match parse(&source_code) {
-        Ok((ast, table)) => {
+    let table = match parse(&source_code) {
+        Ok(table) => {
             all!("Finished succesfully");
-            info!("AST: {ast:?}");
             info!("symbol table: {table:?}");
-            (ast, table)
+            table
         }
         Err(x) => {
             fatal!("Error making program {}", x);
             return Err(anyhow::anyhow!("Error couldn't make program: {:?}", x));
         }
     };
+
+    table.type_check().map_err(|err| {
+        fatal!("Error making program: {}", err);
+        err
+    })?;
 
     let mut file: std::fs::File;
     let mut stdout = stdout();
@@ -142,7 +146,7 @@ fn main() -> anyhow::Result<()> {
         None => &mut stdout as &mut dyn std::io::Write,
     };
 
-    writeln!(writer, "{:?}", ast).map_err(|err| {
+    writeln!(writer, "{:?}", table).map_err(|err| {
         match cli.output.as_ref() {
             Some(path) => fatal!("Failed to write to file {:?}: {:?}", path, err),
             None => fatal!("Failed to write to stdout: {:?}", err),
