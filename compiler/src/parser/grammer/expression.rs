@@ -246,50 +246,75 @@ impl Expression {
                     BinaryOperator::Call => {
                         let f = match a.get_type(type_defs, decls)? {
                             TypeResp::IdentRef(ident) => ident,
-                            _ => return Err(SymbolTableError::TypeError),
+                            _ => {
+                                return Err(SymbolTableError::TypeError(
+                                    "Only Ident's are valid for function calls".into(),
+                                ))
+                            }
                         };
-                        let f = type_defs.get(&f).ok_or(SymbolTableError::TypeError)?;
+                        let f = type_defs.get(&f).ok_or(SymbolTableError::TypeError(
+                            format!("Type `{}` not found", f).into(),
+                        ))?;
 
-                        if let TypeDefInfoType::Function(f) = &f.type_info {
-                            match b.as_ref() {
-                                Expression::List(args) => {
-                                    if args.len() != f.args.len() {
-                                        return Err(SymbolTableError::TypeError);
+                        match &f.type_info {
+                            TypeDefInfoType::Function(f) => {
+                                match b.as_ref() {
+                                    Expression::List(args) => {
+                                        if args.len() != f.args.len() {
+                                            return Err(SymbolTableError::TypeError(
+                                                "must supply an argument list to function".into(),
+                                            ));
+                                        }
+
+                                        return if args
+                                            .iter()
+                                            .map(|arg| match arg.get_type(type_defs, decls)? {
+                                                TypeResp::Void => Err(SymbolTableError::TypeError("".into())),
+                                                x => Ok(x),
+                                            })
+                                            .zip(f.args.iter().map(|x| &x.datatype))
+                                            .all(|(a, b)| matches!((a,b), (Ok(a), b) if a.are_types_eq(&TypeResp::IdentRef(b.clone()), type_defs)))
+                                        {
+                                            Ok(f.ret
+                                                .as_ref()
+                                                .cloned()
+                                                .map(|x| x.into())
+                                                .expect("Void functions not yet implemented"))
+                                        } else {
+                                            Err(SymbolTableError::TypeError("Argument mismatch".into()))
+                                        };
                                     }
-
-                                    return if args
-                                        .iter()
-                                        .map(|arg| match arg.get_type(type_defs, decls)? {
-                                            TypeResp::IdentRef(ident) => Ok(ident),
-                                            _ => Err(SymbolTableError::TypeError),
-                                        })
-                                        .zip(f.args.iter().map(|x| &x.datatype))
-                                        .all(|(a, b)| matches!((a,b), (Ok(a), b) if &a == b))
-                                    {
-                                        Ok(f.ret
-                                            .as_ref()
-                                            .cloned()
-                                            .map(|x| x.into())
-                                            .expect("Void functions not yet implemented"))
-                                    } else {
-                                        Err(SymbolTableError::TypeError)
-                                    };
-                                }
-                                _ => return Err(SymbolTableError::TypeError),
-                            };
+                                    _ => {
+                                        return Err(SymbolTableError::TypeError(
+                                            "Only List may be proccesed".into(),
+                                        ))
+                                    }
+                                };
+                            }
+                            _ => {
+                                return Err(SymbolTableError::TypeError(
+                                    "type must be function to call".into(),
+                                ))
+                            }
                         }
                     }
                     BinaryOperator::Eq => {
                         if let Expression::Ident(ident) = a.as_ref() {
                             decls
                                 .get(ident)
-                                .ok_or(SymbolTableError::TypeError)
+                                .ok_or(SymbolTableError::TypeError(
+                                    format!("Type `{}` not found", ident).into(),
+                                ))
                                 .and_then(|decl| {
-                                    decl.is_mut.then_some(()).ok_or(SymbolTableError::TypeError)
+                                    decl.is_mut.then_some(()).ok_or(SymbolTableError::TypeError(
+                                        "Type must be mut in order to change value".into(),
+                                    ))
                                 })?
                         } else {
                             // TODO: implement mutable refrences
-                            return Err(SymbolTableError::TypeError);
+                            return Err(SymbolTableError::TypeError(
+                                "only idents can be used with an equal check".into(),
+                            ));
                         }
                     }
                     _ => (),
@@ -304,25 +329,28 @@ impl Expression {
                 if type_def.are_types_eq(&b.get_type(type_defs, decls)?, type_defs) {
                     Ok(type_def)
                 } else {
-                    Err(SymbolTableError::TypeError)
+                    Err(SymbolTableError::TypeError("Type mismatch".into()))
                 }
             }
             Expression::UnaryOp(_, expr) => expr.get_type(type_defs, decls),
-            Expression::List(_) => Err(SymbolTableError::TypeError),
+            Expression::List(_) => Err(SymbolTableError::TypeError(
+                "Can't have a naked list".into(),
+            )),
             Expression::Ident(ident) => decls
                 .get(ident)
                 .cloned()
                 .map(|x| x.ident.into())
-                .ok_or(SymbolTableError::TypeError),
+                .ok_or(SymbolTableError::TypeError("Idents must be declard".into())),
             Expression::Constant(ConstantExpression::IntLit(_)) => Ok(TypeResp::IntLike),
             Expression::Constant(ConstantExpression::FloatLit(_)) => Ok(TypeResp::FloatLike),
             Expression::Constant(ConstantExpression::CharLit(_)) => {
                 unimplemented!("TODO: CHARLIT")
             }
             Expression::Constant(ConstantExpression::StrLit(_)) => unimplemented!("TODO: STRLIT"),
-            Expression::Constant(ConstantExpression::TypeLit(_)) => {
-                Err(SymbolTableError::TypeError)
-            }
+            Expression::Constant(ConstantExpression::TypeLit(_)) => Err(
+                // TODO: comptime functions
+                SymbolTableError::TypeError("Types must be removed at previous stage".into()),
+            ),
         }
     }
 

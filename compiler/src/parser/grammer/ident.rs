@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use lexer::LexerIterator;
 
 use crate::{
@@ -9,6 +11,12 @@ use crate::{
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Ident {
     pub value: Box<str>,
+}
+
+impl Display for Ident {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value)
+    }
 }
 
 impl<A> From<A> for Ident

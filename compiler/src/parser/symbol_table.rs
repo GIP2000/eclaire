@@ -17,8 +17,8 @@ use super::grammer::expression::TypeDefInfoType;
 
 #[derive(Debug, Error)]
 pub enum SymbolTableError {
-    #[error("Type error")]
-    TypeError,
+    #[error("Type error: {0}")]
+    TypeError(Box<str>),
     #[error("This identifier already exists in this scope {0:?}")]
     IdentAlreadyExist(Ident),
     #[error("You can't pop the root of the symbol table")]
@@ -100,7 +100,7 @@ impl SymbolTableType {
             | TypeDefInfoType::Struct(_)
             | TypeDefInfoType::Enum(_)
             | TypeDefInfoType::TypeDefPrim(_) => Some(result),
-            TypeDefInfoType::TypeDefAlias(alias) => become self.get_as_until_root(alias, table_idx),
+            TypeDefInfoType::TypeDefAlias(alias) => self.get_as_until_root(alias, table_idx),
         }
     }
 
@@ -145,18 +145,26 @@ impl SymbolTableType {
                                         TypeResp::IdentRef(ident) => ident,
 
                                         // TODO: consider handling void types better
-                                        TypeResp::Void => return Err(SymbolTableError::TypeError),
+                                        TypeResp::Void => {
+                                            return Err(SymbolTableError::TypeError(
+                                                "Can't assign variable to void type".into(),
+                                            ))
+                                        }
 
-                                        TypeResp::IntLike => self
-                                            .default_int
-                                            .as_ref()
-                                            .cloned()
-                                            .ok_or(SymbolTableError::TypeError)?,
-                                        TypeResp::FloatLike => self
-                                            .default_float
-                                            .as_ref()
-                                            .cloned()
-                                            .ok_or(SymbolTableError::TypeError)?,
+                                        TypeResp::IntLike => {
+                                            self.default_int.as_ref().cloned().ok_or(
+                                                SymbolTableError::TypeError(
+                                                    "No default Int set".into(),
+                                                ),
+                                            )?
+                                        }
+                                        TypeResp::FloatLike => {
+                                            self.default_float.as_ref().cloned().ok_or(
+                                                SymbolTableError::TypeError(
+                                                    "No default Float set".into(),
+                                                ),
+                                            )?
+                                        }
                                     };
                                     decls.insert(
                                         assignment.ident.clone(),
@@ -181,7 +189,10 @@ impl SymbolTableType {
                                             TypeResp::IntLike => {
                                                 let mut type_data = self
                                                     .get_as(type_name, idx)
-                                                    .ok_or(SymbolTableError::TypeError)?;
+                                                    .ok_or(SymbolTableError::TypeError(
+                                                        format!("Type `{}` not found", type_name)
+                                                            .into(),
+                                                    ))?;
 
                                                 loop {
                                                     match &type_data.type_info {
@@ -197,12 +208,22 @@ impl SymbolTableType {
                                                         TypeDefInfoType::TypeDefAlias(ident) => {
                                                             type_data =
                                                                 self.get_as(&ident, idx).ok_or(
-                                                                    SymbolTableError::TypeError,
+                                                                    SymbolTableError::TypeError(
+                                                                        format!(
+                                                                            "Type `{}` not found",
+                                                                            ident
+                                                                        )
+                                                                        .into(),
+                                                                    ),
                                                                 )?;
                                                         }
 
                                                         _ => {
-                                                            return Err(SymbolTableError::TypeError)
+                                                            return Err(
+                                                                SymbolTableError::TypeError(
+                                                                    "Type Mismatch".into(),
+                                                                ),
+                                                            )
                                                         }
                                                     }
                                                 }
@@ -210,7 +231,10 @@ impl SymbolTableType {
                                             TypeResp::FloatLike => {
                                                 let mut type_data = self
                                                     .get_as(type_name, idx)
-                                                    .ok_or(SymbolTableError::TypeError)?;
+                                                    .ok_or(SymbolTableError::TypeError(
+                                                        format!("Type `{}` not found", type_name)
+                                                            .into(),
+                                                    ))?;
 
                                                 loop {
                                                     match &type_data.type_info {
@@ -225,11 +249,21 @@ impl SymbolTableType {
                                                         TypeDefInfoType::TypeDefAlias(ident) => {
                                                             type_data =
                                                                 self.get_as(&ident, idx).ok_or(
-                                                                    SymbolTableError::TypeError,
+                                                                    SymbolTableError::TypeError(
+                                                                        format!(
+                                                                            "Type `{}` not found",
+                                                                            ident
+                                                                        )
+                                                                        .into(),
+                                                                    ),
                                                                 )?;
                                                         }
                                                         _ => {
-                                                            return Err(SymbolTableError::TypeError)
+                                                            return Err(
+                                                                SymbolTableError::TypeError(
+                                                                    "Only root type allowed".into(),
+                                                                ),
+                                                            )
                                                         }
                                                     }
                                                 }
@@ -244,7 +278,9 @@ impl SymbolTableType {
                                 }
                                 // TODO: put a better error
                                 (Some(_), Some(_)) | (None, None) => {
-                                    return Err(SymbolTableError::TypeError);
+                                    return Err(SymbolTableError::TypeError(
+                                        "Not enough info to make an infrence".into(),
+                                    ));
                                 }
                             }
                         }
