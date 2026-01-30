@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod test;
 
-use crate::{info, trace};
+use crate::info;
 use lexer::LexerOutput;
 use proc_lexer::Lexer;
 

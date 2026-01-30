@@ -93,10 +93,10 @@ impl<A: AcceptFunc> std::fmt::Debug for Trie<A> {
 }
 
 impl<A: AcceptFunc + Eq> Trie<A> {
+    #[allow(dead_code)]
     pub(crate) fn from_regex(regex: &str, accept: A) -> Result<Self> {
         let mut size = 0;
 
-        let a = TerminalNodeElement::Accept(accept.clone(), 0);
         let root: TrieNode<A> =
             TrieNode::from_iterator(&mut regex.bytes().map(|x| x.into()).peekable(), &mut size)?
                 // Add the accept state to the end
