@@ -34,6 +34,8 @@ pub struct SymbolTable<V> {
     index_stack: Vec<Vec<usize>>,
     pub default_int: Option<Ident>,
     pub default_float: Option<Ident>,
+    pub default_bool: Option<Ident>,
+    pub default_char: Option<Ident>,
 }
 
 pub trait SymbolTablePair<Ret> {
@@ -88,6 +90,8 @@ impl<V> Default for SymbolTable<V> {
             index_stack: vec![Vec::new()],
             default_int: None,
             default_float: None,
+            default_bool: None,
+            default_char: None,
         }
     }
 }
@@ -133,163 +137,15 @@ impl SymbolTableType {
                 decls.insert(arg.name.clone(), arg.datatype.clone().into())?;
             }
 
+            let f_ret_name = f
+                .ret
+                .as_ref()
+                .cloned()
+                .map(|name| name.into())
+                .unwrap_or(TypeResp::Void);
+
             for statment in f.statments.iter() {
-                match statment {
-                    Statment::Assignment(assignment) => match assignment.assignment_type {
-                        AssignmentType::Let(is_mut) => {
-                            match (assignment.expr.as_ref(), assignment.data_type.as_ref()) {
-                                (Some(expr), None) => {
-                                    let typeresp = expr.get_type((self, idx), decls)?;
-
-                                    let type_resp_ident = match typeresp {
-                                        TypeResp::IdentRef(ident) => ident,
-
-                                        // TODO: consider handling void types better
-                                        TypeResp::Void => {
-                                            return Err(SymbolTableError::TypeError(
-                                                "Can't assign variable to void type".into(),
-                                            ))
-                                        }
-
-                                        TypeResp::IntLike => {
-                                            self.default_int.as_ref().cloned().ok_or(
-                                                SymbolTableError::TypeError(
-                                                    "No default Int set".into(),
-                                                ),
-                                            )?
-                                        }
-                                        TypeResp::FloatLike => {
-                                            self.default_float.as_ref().cloned().ok_or(
-                                                SymbolTableError::TypeError(
-                                                    "No default Float set".into(),
-                                                ),
-                                            )?
-                                        }
-                                    };
-                                    decls.insert(
-                                        assignment.ident.clone(),
-                                        DeclNode::new(type_resp_ident, is_mut),
-                                    )?;
-                                }
-                                (None, Some(type_name)) => {
-                                    decls.insert(
-                                        assignment.ident.clone(),
-                                        DeclNode::new(type_name.clone(), is_mut),
-                                    )?;
-                                }
-                                (Some(expr), Some(type_name))
-                                    if {
-                                        let type_resp = expr.get_type((self, idx), decls)?;
-
-                                        match &type_resp {
-                                            TypeResp::IdentRef(ident) => ident == type_name,
-                                            TypeResp::Void => {
-                                                unimplemented!("figure out how to handle void type")
-                                            }
-                                            TypeResp::IntLike => {
-                                                let mut type_data = self
-                                                    .get_as(type_name, idx)
-                                                    .ok_or(SymbolTableError::TypeError(
-                                                        format!("Type `{}` not found", type_name)
-                                                            .into(),
-                                                    ))?;
-
-                                                loop {
-                                                    match &type_data.type_info {
-                                                        TypeDefInfoType::TypeDefPrim(
-                                                            primative_type,
-                                                        ) => {
-                                                            break matches!(
-                                                                primative_type.like,
-                                                                PrimativeLike::UInt
-                                                                    | PrimativeLike::SInt
-                                                            )
-                                                        }
-                                                        TypeDefInfoType::TypeDefAlias(ident) => {
-                                                            type_data =
-                                                                self.get_as(&ident, idx).ok_or(
-                                                                    SymbolTableError::TypeError(
-                                                                        format!(
-                                                                            "Type `{}` not found",
-                                                                            ident
-                                                                        )
-                                                                        .into(),
-                                                                    ),
-                                                                )?;
-                                                        }
-
-                                                        _ => {
-                                                            return Err(
-                                                                SymbolTableError::TypeError(
-                                                                    "Type Mismatch".into(),
-                                                                ),
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            TypeResp::FloatLike => {
-                                                let mut type_data = self
-                                                    .get_as(type_name, idx)
-                                                    .ok_or(SymbolTableError::TypeError(
-                                                        format!("Type `{}` not found", type_name)
-                                                            .into(),
-                                                    ))?;
-
-                                                loop {
-                                                    match &type_data.type_info {
-                                                        TypeDefInfoType::TypeDefPrim(
-                                                            primative_type,
-                                                        ) => {
-                                                            break matches!(
-                                                                primative_type.like,
-                                                                PrimativeLike::Float
-                                                            )
-                                                        }
-                                                        TypeDefInfoType::TypeDefAlias(ident) => {
-                                                            type_data =
-                                                                self.get_as(&ident, idx).ok_or(
-                                                                    SymbolTableError::TypeError(
-                                                                        format!(
-                                                                            "Type `{}` not found",
-                                                                            ident
-                                                                        )
-                                                                        .into(),
-                                                                    ),
-                                                                )?;
-                                                        }
-                                                        _ => {
-                                                            return Err(
-                                                                SymbolTableError::TypeError(
-                                                                    "Only root type allowed".into(),
-                                                                ),
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } =>
-                                {
-                                    decls.insert(
-                                        assignment.ident.clone(),
-                                        DeclNode::new(type_name.clone(), is_mut),
-                                    )?;
-                                }
-                                // TODO: put a better error
-                                (Some(_), Some(_)) | (None, None) => {
-                                    return Err(SymbolTableError::TypeError(
-                                        "Not enough info to make an infrence".into(),
-                                    ));
-                                }
-                            }
-                        }
-                        AssignmentType::Const => {}
-                    },
-                    Statment::Expression(expr) => {
-                        expr.get_type((self, idx), decls)?;
-                    }
-                }
+                statment.type_check((self, idx), decls, &f_ret_name, &f_ret_name)?;
             }
 
             decls.pop()?;

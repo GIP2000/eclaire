@@ -202,7 +202,7 @@ impl Parse for PrimativeType {
             .unwrap_or(false);
 
         match (is_default, like) {
-            (true, PrimativeLike::SInt) => {
+            (true, PrimativeLike::SInt | PrimativeLike::UInt) => {
                 if symbol_table.default_int.is_some() {
                     return Err(crate::parser::ParserError::Other);
                 }
@@ -212,7 +212,16 @@ impl Parse for PrimativeType {
                     return Err(crate::parser::ParserError::Other);
                 }
             }
-            (true, PrimativeLike::UInt) => unimplemented!("does this make sense?"),
+            (true, PrimativeLike::Bool) => {
+                if symbol_table.default_bool.is_some() {
+                    return Err(crate::parser::ParserError::Other);
+                }
+            }
+            (true, PrimativeLike::Char) => {
+                if symbol_table.default_char.is_some() {
+                    return Err(crate::parser::ParserError::Other);
+                }
+            }
             (false, _) => {}
         }
 
@@ -230,6 +239,8 @@ pub enum PrimativeLike {
     SInt,
     UInt,
     Float,
+    Char,
+    Bool,
 }
 
 impl From<PrimativeLike> for TypeResp {
@@ -237,6 +248,8 @@ impl From<PrimativeLike> for TypeResp {
         match value {
             PrimativeLike::UInt | PrimativeLike::SInt => TypeResp::IntLike,
             PrimativeLike::Float => TypeResp::FloatLike,
+            PrimativeLike::Char => TypeResp::CharLike,
+            PrimativeLike::Bool => TypeResp::BoolLike,
         }
     }
 }
@@ -249,6 +262,8 @@ impl<'a> TryFrom<&LexToken<'a>> for PrimativeLike {
             LexToken::Int => Ok(PrimativeLike::SInt),
             LexToken::UInt => Ok(PrimativeLike::UInt),
             LexToken::Float => Ok(PrimativeLike::Float),
+            LexToken::Bool => Ok(PrimativeLike::Bool),
+            LexToken::Char => Ok(PrimativeLike::Char),
             _ => Err(()),
         }
     }

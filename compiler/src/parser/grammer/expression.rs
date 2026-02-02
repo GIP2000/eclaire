@@ -1,11 +1,11 @@
 use lexer::LexerIterator;
 
 use crate::{
-    debug,
     lexer::{LexToken, MyLexerError},
     parser::{
         grammer::{
-            structures::{Enum, PrimativeType, Struct},
+            statment::Statment,
+            structures::{Enum, PrimativeLike, PrimativeType, Struct},
             Function,
         },
         safe_parse_wrapper,
@@ -117,6 +117,7 @@ pub enum ConstantExpression {
     FloatLit(Box<str>),
     StrLit(Box<str>),
     CharLit(u8),
+    BoolLit(bool),
     TypeLit(TypeDef),
 }
 
@@ -133,6 +134,7 @@ impl Parse for ConstantExpression {
                     IntLit(x) => Some(Self::IntLit((*x).into())),
                     FloatLit(x) => Some(Self::FloatLit((*x).into())),
                     CharLit(x) => Some(Self::CharLit(*x)),
+                    BoolLit(x) => Some(Self::BoolLit(*x)),
                     _ => None,
                 }
             })
@@ -144,12 +146,108 @@ impl Parse for ConstantExpression {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct BlockExpression(Vec<Statment>, usize);
+
+impl BlockExpression {
+    pub fn get_type(
+        &self,
+        type_defs: (&SymbolTableType, usize),
+        decls: &mut SymbolTableDecl,
+        func_ret_type: &TypeResp,
+    ) -> std::result::Result<TypeResp, SymbolTableError> {
+        let Self(statments, sidx) = self;
+
+        decls.push();
+
+        // shadow with new context
+        let type_defs = (type_defs.0, *sidx);
+
+        let mut found = false;
+        let mut first = TypeResp::Void;
+        for s in statments.iter() {
+            if let (Statment::Return(false, expr), false) = (s, found) {
+                first = expr.get_type(type_defs, decls, func_ret_type)?;
+                found = true;
+            };
+            s.type_check(type_defs, decls, func_ret_type, &first)?;
+        }
+
+        decls.pop()?;
+
+        Ok(first)
+    }
+}
+
+impl Parse for BlockExpression {
+    fn from_lexer<'a>(
+        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTableType,
+    ) -> Result<Self> {
+        token_stream.next_matches(LexToken::OCBracket)?;
+
+        let sidx = symbol_table.push();
+        let IterPlusError(result, following) = token_stream.parse_many(symbol_table).collect();
+        token_stream
+            .next_matches(LexToken::CCBracket)
+            .map_err(|err| following.unwrap_or(err.into()))?;
+
+        symbol_table.pop().map_err(|_| ParserError::Other)?;
+
+        Ok(Self(result, sidx))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FullIfExpression(Box<Expression>, BlockExpression);
+
+#[derive(Debug, Clone)]
+pub enum IfExtentionNode {
+    ElseIf(FullIfExpression),
+    Else(BlockExpression),
+}
+
+impl Parse for IfExtentionNode {
+    fn from_lexer<'a>(
+        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTableType,
+    ) -> Result<Self> {
+        token_stream.next_matches(LexToken::Else)?;
+
+        let (expr, block) = token_stream
+            .parse_with(symbol_table, |t, s| {
+                Expression::base_control_flow_expression(t, s, |x| match x {
+                    LexToken::If => Some(LexToken::If),
+                    _ => None,
+                })
+            })
+            .map(|(_, expr, block)| (Some(expr), block))
+            .or_else(|_| token_stream.parse(symbol_table).map(|block| (None, block)))?;
+
+        Ok(match expr {
+            Some(expr) => Self::ElseIf(FullIfExpression(Box::new(expr), block)),
+            None => Self::Else(block),
+        })
+    }
+}
+
+impl IfExtentionNode {
+    pub fn get_block(&self) -> &BlockExpression {
+        match self {
+            IfExtentionNode::Else(b) | IfExtentionNode::ElseIf(FullIfExpression(_, b)) => b,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Expression {
     BinaryOp(Box<Expression>, BinaryOperator, Box<Expression>),
     UnaryOp(UnaryOperator, Box<Expression>),
 
     List(Vec<Expression>),
+    BlockExpression(BlockExpression),
+    IfExpression(FullIfExpression, Vec<IfExtentionNode>),
+    WhileExpression(Box<Expression>, BlockExpression),
 
     Ident(Ident),
     Constant(ConstantExpression),
@@ -198,6 +296,56 @@ pub enum TypeResp {
     Void,
     IntLike,
     FloatLike,
+    CharLike,
+    BoolLike,
+}
+
+macro_rules! is_type_resp {
+    ($resp: ident, $table: ident, $prim_like: pat, $type_resp_like: pat) => {
+        match $resp {
+            TypeResp::IdentRef(ident) => {
+                let r_type = $table.get_until_root(ident);
+
+                match r_type {
+                    Some(TypeDef {
+                        size_bits: _,
+                        type_info:
+                            TypeDefInfoType::TypeDefPrim(PrimativeType {
+                                size: _,
+                                like: $prim_like,
+                                is_default: _,
+                            }),
+                    }) => true,
+                    _ => false,
+                }
+            }
+            $type_resp_like => true,
+            _ => false,
+        }
+    };
+}
+
+impl TypeResp {
+    pub fn is_int(&self, type_defs: (&SymbolTableType, usize)) -> bool {
+        is_type_resp!(
+            self,
+            type_defs,
+            PrimativeLike::UInt | PrimativeLike::SInt,
+            TypeResp::IntLike
+        )
+    }
+
+    pub fn is_float(&self, type_defs: (&SymbolTableType, usize)) -> bool {
+        is_type_resp!(self, type_defs, PrimativeLike::Float, TypeResp::FloatLike)
+    }
+
+    pub fn is_uint(&self, type_defs: (&SymbolTableType, usize)) -> bool {
+        is_type_resp!(self, type_defs, PrimativeLike::UInt, TypeResp::IntLike)
+    }
+
+    pub fn is_bool(&self, type_defs: (&SymbolTableType, usize)) -> bool {
+        is_type_resp!(self, type_defs, PrimativeLike::Bool, TypeResp::BoolLike)
+    }
 }
 
 impl CompareTypes for TypeResp {
@@ -238,13 +386,14 @@ impl Expression {
     pub fn get_type(
         &self,
         type_defs: (&SymbolTableType, usize),
-        decls: &SymbolTableDecl,
+        decls: &mut SymbolTableDecl,
+        func_ret_type: &TypeResp,
     ) -> std::result::Result<TypeResp, SymbolTableError> {
         match self {
             Expression::BinaryOp(a, op, b) => {
                 match op {
                     BinaryOperator::Call => {
-                        let f = match a.get_type(type_defs, decls)? {
+                        let f = match a.get_type(type_defs, decls, func_ret_type)? {
                             TypeResp::IdentRef(ident) => ident,
                             _ => {
                                 return Err(SymbolTableError::TypeError(
@@ -268,7 +417,7 @@ impl Expression {
 
                                         return if args
                                             .iter()
-                                            .map(|arg| match arg.get_type(type_defs, decls)? {
+                                            .map(|arg| match arg.get_type(type_defs, decls, func_ret_type)? {
                                                 TypeResp::Void => Err(SymbolTableError::TypeError("".into())),
                                                 x => Ok(x),
                                             })
@@ -320,19 +469,38 @@ impl Expression {
                     _ => (),
                 }
 
-                let type_def = a.get_type(type_defs, decls)?;
+                let type_def = a.get_type(type_defs, decls, func_ret_type)?;
 
-                // TODO: for now they have to be the same
+                // TODO: for now they mostly have to be the same
                 // in the future ill have implementations that I will have to check between the two
                 // types to see if I can do this operation to the type
                 // if type_def == b.get_type(type_defs, decls)? {
-                if type_def.are_types_eq(&b.get_type(type_defs, decls)?, type_defs) {
-                    Ok(type_def)
+                if type_def.are_types_eq(&b.get_type(type_defs, decls, func_ret_type)?, type_defs) {
+                    if op.is_assignment() {
+                        Ok(TypeResp::Void)
+                    } else if op.is_comparison() {
+                        type_defs
+                            .0
+                            .default_bool
+                            .as_ref()
+                            .cloned()
+                            .map(|bool_type| TypeResp::IdentRef(bool_type))
+                            .ok_or(SymbolTableError::TypeError("No boolean type set".into()))
+                    } else {
+                        Ok(type_def)
+                    }
                 } else {
                     Err(SymbolTableError::TypeError("Type mismatch".into()))
                 }
             }
-            Expression::UnaryOp(_, expr) => expr.get_type(type_defs, decls),
+            Expression::UnaryOp(UnaryOperator::Not, expr) => expr
+                .get_type(type_defs, decls, func_ret_type)
+                .and_then(|x| {
+                    x.is_bool(type_defs)
+                        .then_some(x)
+                        .ok_or(SymbolTableError::TypeError("Must be a bool".into()))
+                }),
+            Expression::UnaryOp(_, expr) => expr.get_type(type_defs, decls, func_ret_type),
             Expression::List(_) => Err(SymbolTableError::TypeError(
                 "Can't have a naked list".into(),
             )),
@@ -343,14 +511,66 @@ impl Expression {
                 .ok_or(SymbolTableError::TypeError("Idents must be declard".into())),
             Expression::Constant(ConstantExpression::IntLit(_)) => Ok(TypeResp::IntLike),
             Expression::Constant(ConstantExpression::FloatLit(_)) => Ok(TypeResp::FloatLike),
-            Expression::Constant(ConstantExpression::CharLit(_)) => {
-                unimplemented!("TODO: CHARLIT")
+            Expression::Constant(ConstantExpression::CharLit(_)) => Ok(TypeResp::CharLike),
+            Expression::Constant(ConstantExpression::BoolLit(_)) => Ok(TypeResp::BoolLike),
+            Expression::Constant(ConstantExpression::StrLit(_)) => {
+                unimplemented!("TODO: STRLIT (and pointers)")
             }
-            Expression::Constant(ConstantExpression::StrLit(_)) => unimplemented!("TODO: STRLIT"),
             Expression::Constant(ConstantExpression::TypeLit(_)) => Err(
                 // TODO: comptime functions
                 SymbolTableError::TypeError("Types must be removed at previous stage".into()),
             ),
+            // TODO: typecheck the rest of the statments
+            Expression::BlockExpression(block) => block.get_type(type_defs, decls, func_ret_type),
+            Expression::IfExpression(base_if, extentions) => {
+                let e_type = base_if.0.get_type(type_defs, decls, func_ret_type)?;
+
+                e_type
+                    .is_bool(type_defs)
+                    .then_some(())
+                    .ok_or(SymbolTableError::TypeError("must be a bool".into()))?;
+
+                let r_type = base_if.1.get_type(type_defs, decls, func_ret_type)?;
+
+                for ext in extentions.iter() {
+                    match ext {
+                        IfExtentionNode::ElseIf(FullIfExpression(expr, _)) => expr
+                            .get_type(type_defs, decls, func_ret_type)
+                            .and_then(|x| {
+                                x.is_bool(type_defs)
+                                    .then_some(())
+                                    .ok_or(SymbolTableError::TypeError("Must be a bool".into()))
+                            })?,
+                        _ => (),
+                    };
+                    let ext_type = ext.get_block().get_type(type_defs, decls, func_ret_type)?;
+
+                    ext_type
+                        .are_types_eq(&r_type, type_defs)
+                        .then_some(())
+                        .ok_or(SymbolTableError::TypeError("".into()))?;
+                }
+
+                Ok(r_type)
+            }
+            Expression::WhileExpression(expr, block_expression) => {
+                // TODO: handle booleans
+                expr.get_type(type_defs, decls, func_ret_type)
+                    .and_then(|x| {
+                        x.is_bool(type_defs)
+                            .then_some(())
+                            .ok_or(SymbolTableError::TypeError("must be bool".into()))
+                    })?;
+
+                let r_type = block_expression.get_type(type_defs, decls, func_ret_type)?;
+
+                r_type
+                    .are_types_eq(&TypeResp::Void, type_defs)
+                    .then_some(TypeResp::Void)
+                    .ok_or(SymbolTableError::TypeError(
+                        "While loop block expression types must be void for now".into(),
+                    ))
+            }
         }
     }
 
@@ -370,13 +590,21 @@ impl Expression {
             return Ok(expression);
         }
 
+        if let Ok(block) = token_stream.parse(symbol_table) {
+            return Ok(Expression::BlockExpression(block));
+        }
+
+        if let Ok(expr) = token_stream.parse_with(symbol_table, Expression::control_flow_expression)
+        {
+            return Ok(expr);
+        }
+
         let ident: Result<Ident> = token_stream.parse(symbol_table);
         if let Ok(ident) = ident {
             return Ok(Expression::Ident(ident));
         }
 
         let constant = token_stream.parse(symbol_table)?;
-        debug!("Constant = {constant:?}");
 
         return Ok(Expression::Constant(constant));
     }
@@ -573,6 +801,46 @@ impl Expression {
         })(token_stream, symbol_table)
     }
 
+    fn base_control_flow_expression<'a>(
+        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTableType,
+        top: impl Fn(&LexToken<'a>) -> Option<LexToken<'a>>,
+    ) -> Result<(LexToken<'a>, Expression, BlockExpression)> {
+        let op = token_stream.next_matches_func(top)?;
+
+        let expr: Expression = token_stream.parse(symbol_table)?;
+        let block: BlockExpression = token_stream.parse(symbol_table)?;
+
+        Ok((op, expr, block))
+    }
+
+    fn control_flow_expression<'a>(
+        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
+        symbol_table: &mut SymbolTableType,
+    ) -> Result<Expression> {
+        trace!("Entering Control Flow Expression");
+
+        let (op, expr, block) = token_stream.parse_with(symbol_table, |t, s| {
+            Self::base_control_flow_expression(t, s, |x| match x {
+                y @ LexToken::If | y @ LexToken::While => Some(y.clone()),
+                _ => None,
+            })
+        })?;
+
+        Ok(match op {
+            LexToken::If => {
+                let ext: Vec<IfExtentionNode> = token_stream
+                    .parse_many(symbol_table)
+                    .map_while(|x| x.ok())
+                    .collect();
+
+                Self::IfExpression(FullIfExpression(Box::new(expr), block), ext)
+            }
+            LexToken::While => Self::WhileExpression(Box::new(expr), block),
+            _ => unreachable!("I filtered this already"),
+        })
+    }
+
     fn assignment_expression<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
         symbol_table: &mut SymbolTableType,
@@ -655,7 +923,7 @@ pub enum BinaryOperator {
     Add,
     Sub,
 
-    // conditional
+    // comparison
     Gt,
     Gte,
     Lt,
@@ -689,6 +957,21 @@ pub enum BinaryOperator {
     XOREQ,
     OREQ,
     Eq,
+}
+
+impl BinaryOperator {
+    pub fn is_assignment(&self) -> bool {
+        use BinaryOperator::*;
+        matches!(
+            self,
+            TIMESEQ | DIVEQ | MODEQ | PLUSEQ | MINUSEQ | SHLEQ | SHREQ | ANDEQ | XOREQ | OREQ | Eq
+        )
+    }
+
+    pub fn is_comparison(&self) -> bool {
+        use BinaryOperator::*;
+        matches!(self, Gt | Gte | Lt | Lte | BoolEq | NotEq | LogAnd | LogOr)
+    }
 }
 
 impl<'a> TryFrom<&LexToken<'a>> for BinaryOperator {
@@ -737,7 +1020,6 @@ impl<'a> TryFrom<&LexToken<'a>> for BinaryOperator {
             LexToken::XOREQ => Ok(Self::XOREQ),
             LexToken::OREQ => Ok(Self::OREQ),
             LexToken::Eq => Ok(Self::Eq),
-
             _ => Err(()),
         }
     }

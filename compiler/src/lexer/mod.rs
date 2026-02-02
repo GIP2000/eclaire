@@ -5,8 +5,6 @@ use crate::info;
 use lexer::LexerOutput;
 use proc_lexer::Lexer;
 
-use std::str::FromStr;
-
 pub type MyLexerError = anyhow::Error;
 type Result<T> = std::result::Result<T, MyLexerError>;
 
@@ -15,6 +13,8 @@ type Result<T> = std::result::Result<T, MyLexerError>;
 pub enum LexToken<'a> {
     #[regex("fn")]
     Fn,
+    #[regex("return")]
+    Return,
     #[regex("\\(")]
     OParen,
     #[regex("\\)")]
@@ -46,12 +46,16 @@ pub enum LexToken<'a> {
     #[regex("\\.")]
     Dot,
 
-    #[regex("int")]
+    #[regex("__int__")]
     Int,
-    #[regex("uint")]
+    #[regex("__uint__")]
     UInt,
-    #[regex("float")]
+    #[regex("__float__")]
     Float,
+    #[regex("__bool__")]
+    Bool,
+    #[regex("__char__")]
+    Char,
 
     #[regex("+")]
     Plus,
@@ -125,9 +129,24 @@ pub enum LexToken<'a> {
     #[regex("primative")]
     Primative,
 
-    #[regex("true", func = parse_bool)]
-    #[regex("false", func = parse_bool)]
+    #[regex("true", func = parse_bool_true)]
+    #[regex("false", func = parse_bool_false)]
     BoolLit(bool),
+
+    // Control Flow
+    #[regex("if")]
+    If,
+    #[regex("else")]
+    Else,
+
+    // Loops
+    #[regex("while")]
+    While,
+
+    #[regex("break")]
+    Break,
+    #[regex("continue")]
+    Continue,
 
     #[regex("\"[^\"]*\"", func = parse_string)]
     StrLit(&'a str),
@@ -160,8 +179,12 @@ impl<'a> LexToken<'a> {
     }
 }
 
-fn parse_bool<'a>(x: &'a str) -> Result<LexToken<'a>> {
-    Ok(LexToken::BoolLit(bool::from_str(x).expect("")))
+fn parse_bool_true<'a>(_x: &'a str) -> Result<LexToken<'a>> {
+    Ok(LexToken::BoolLit(true))
+}
+
+fn parse_bool_false<'a>(_x: &'a str) -> Result<LexToken<'a>> {
+    Ok(LexToken::BoolLit(false))
 }
 
 fn parse_string<'a>(x: &'a str) -> Result<LexToken<'a>> {

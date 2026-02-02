@@ -95,16 +95,25 @@ impl Parse for Assignment {
                 match &type_data.type_info {
                     TypeDefInfoType::TypeDefPrim(primative_type) if primative_type.is_default => {
                         match primative_type.like {
-                            PrimativeLike::SInt => {
+                            PrimativeLike::SInt | PrimativeLike::UInt => {
                                 assert!(symbol_table.default_int.is_none(), "I checked earlier");
 
                                 symbol_table.default_int = Some(ident.clone());
                             }
-                            PrimativeLike::UInt => unreachable!("I should error earlier than this"),
                             PrimativeLike::Float => {
                                 assert!(symbol_table.default_float.is_none(), "I checked earlier");
 
                                 symbol_table.default_float = Some(ident.clone());
+                            }
+                            PrimativeLike::Char => {
+                                assert!(symbol_table.default_char.is_none(), "I checked earlier");
+
+                                symbol_table.default_char = Some(ident.clone());
+                            }
+                            PrimativeLike::Bool => {
+                                assert!(symbol_table.default_bool.is_none(), "I checked earlier");
+
+                                symbol_table.default_bool = Some(ident.clone());
                             }
                         }
                     }

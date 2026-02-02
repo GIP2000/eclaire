@@ -3,14 +3,17 @@ use crate::parser::grammer::expression::{TypeDef, TypeDefInfoType};
 use super::*;
 
 #[test]
+fn test_bools() {}
+
+#[test]
 fn test_type_checking_wrong() {
     let table = parse(
         "
-        const i32 = primative(int, 32, true);
-        const u32 = primative(uint, 32, false);
+        const i32 = primative(__int__, 32, true);
+        const u32 = primative(__uint__, 32, false);
 
-        const f32 = primative(float, 32, true);
-        const f64 = primative(float, 64, false);
+        const f32 = primative(__float__, 32, true);
+        const f64 = primative(__float__, 64, false);
 
         const structFoo = struct {
             a_i32: i32,
@@ -44,17 +47,19 @@ fn test_type_checking_wrong() {
 fn test_type_checking() {
     let table = parse(
         "
-        const i32 = primative(int, 32, true);
-        const u32 = primative(uint, 32, false);
+        const i32 = primative(__int__, 32, true);
+        const u32 = primative(__uint__, 32, false);
 
-        const f32 = primative(float, 32, true);
-        const f64 = primative(float, 64, false);
+        const f32 = primative(__float__, 32, true);
+        const f64 = primative(__float__, 64, false);
+
+        const bool = primative(__bool__, 8, true);
 
         const structFoo = struct {
             a_i32: i32,
             b_u32: u32,
             c_f32: f32
-            c_f64: f64
+            c_f64: bool
 
         };
 
@@ -72,6 +77,21 @@ fn test_type_checking() {
             let foo = x + 1;
             let bar = foo + x;
 
+            let mut y = x;
+
+
+            let test = foo >= bar;
+
+            let new_val = if test {
+                y = x + 10;
+                0
+            } else if !test {
+                y = -x;
+                1
+            } else {
+              2
+            };
+
             let s: structFoo;
 
         };
@@ -80,6 +100,8 @@ fn test_type_checking() {
     .expect("is valid");
 
     table.type_check().expect("type's are valid");
+
+    eprintln!("TABLE = {:?}", table);
 }
 
 #[test]
@@ -87,10 +109,10 @@ fn test_typing() {
     let val = parse(
         "
 
-        const i32 = primative(int, 32, true);
-        const u32 = primative(uint, 32, false);
-        const f32 = primative(float, 32, true);
-        const f64 = primative(float, 64, false);
+        const i32 = primative(__int__, 32, true);
+        const u32 = primative(__uint__, 32, false);
+        const f32 = primative(__float__, 32, true);
+        const f64 = primative(__float__, 64, false);
 
         const foo = fn() {
             let x = 1;
