@@ -3,7 +3,7 @@ use crate::{
     lexer::LexToken,
     parser::{
         grammer::{
-            expression::{ConstantExpression, Expression, TypeDefInfoType},
+            expression::{ConstantExpression, Expression, TypeDefInfoType, TypeResp},
             ident::Ident,
             structures::PrimativeLike,
         },
@@ -67,21 +67,14 @@ impl<'a> CompareTypes<'a, TypeRespConcrete> for TypeRespConcrete {
         type_defs: (&SymbolTableType, usize),
     ) -> bool {
         match (self, other) {
-            (TypeRespConcrete::IdentRef(ident), _) | (_, TypeRespConcrete::IdentRef(ident)) => {
-                let a = type_defs.get_until_root(ident);
-
-                match a {
-                    Some(a) => a.are_types_eq(other, type_defs),
-                    None => false,
-                }
-            }
-            (TypeRespConcrete::Void, TypeRespConcrete::Void) => true,
-            (TypeRespConcrete::Void, _) => false,
+            // small clone optimization to not have to clone a million objects if its a pointer
+            // first
             (
                 TypeRespConcrete::Pointer(is_mut1, type_resp1),
                 TypeRespConcrete::Pointer(is_mut2, type_resp2),
             ) => is_mut1 == is_mut2 && type_resp1.are_types_eq(type_resp2.as_ref(), type_defs),
             (TypeRespConcrete::Pointer(_, _), _) => false,
+            (a, b) => TypeResp::from(a.clone()).are_types_eq(&TypeResp::from(b.clone()), type_defs),
         }
     }
 }

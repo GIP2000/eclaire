@@ -62,12 +62,8 @@ impl<'a> CompareTypes<'a, TypeRespConcrete> for TypeDef {
             (TypeRespConcrete::IdentRef(ident), _) => type_defs
                 .get_until_root(ident)
                 .are_types_eq(&Some(self), type_defs),
-            (TypeRespConcrete::Void, TypeDefInfoType::TypeDefAlias(TypeRespConcrete::Void)) => true,
+            (a, TypeDefInfoType::TypeDefAlias(b)) => a.are_types_eq(b, type_defs),
             (TypeRespConcrete::Void, _) => false,
-            (
-                TypeRespConcrete::Pointer(is_mut1, a),
-                TypeDefInfoType::TypeDefAlias(TypeRespConcrete::Pointer(is_mut2, b)),
-            ) => is_mut1 == is_mut2 && a.are_types_eq(b.as_ref(), type_defs),
             (TypeRespConcrete::Pointer(_, _), _) => false,
         }
     }
@@ -92,7 +88,7 @@ impl<'a> CompareTypes<'a, TypeDef> for TypeDef {
                     val.are_types_eq(&Some(other), type_defs)
                 }
                 x @ TypeRespConcrete::Void => x.are_types_eq(other, type_defs),
-                TypeRespConcrete::Pointer(_, _) => false,
+                TypeRespConcrete::Pointer(_, _) => unreachable!("I checked above"),
             },
             (Struct(s1), Struct(s2)) => s1.are_types_eq(s2, type_defs),
             (Enum(e1), Enum(e2)) => e1.are_types_eq(e2, type_defs),
