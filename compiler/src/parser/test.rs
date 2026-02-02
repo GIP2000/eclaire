@@ -3,7 +3,41 @@ use crate::parser::grammer::expression::{TypeDef, TypeDefInfoType};
 use super::*;
 
 #[test]
-fn test_bools() {}
+
+fn test_strings() {
+    let table = parse(
+        "
+        const i32 = primative(__int__, 32, true);
+        const u32 = primative(__uint__, 32, false);
+
+        const f32 = primative(__float__, 32, true);
+        const f64 = primative(__float__, 64, false);
+
+        const bool = primative(__bool__, 32, true);
+
+        const char = primative(__char__, 8, true);
+
+        const foo = fn() {
+            let x: &char = \"hi there\";
+            // let c: char = '1';
+            // let x2 = \"hi there\";
+
+            // if x == x2 {
+            //
+            //
+            // };
+
+
+
+        };
+        ",
+    )
+    .expect("Should be vaild");
+
+    eprintln!("HERE I AM: table = {:?}", table);
+
+    table.type_check().expect("all good");
+}
 
 #[test]
 fn test_type_checking_wrong() {

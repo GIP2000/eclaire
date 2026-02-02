@@ -352,24 +352,6 @@ pub enum TypeResp {
     Pointer(bool, Box<TypeResp>),
 }
 
-impl TryFrom<TypeResp> for TypeRespConcrete {
-    type Error = SymbolTableError;
-
-    fn try_from(value: TypeResp) -> std::result::Result<Self, Self::Error> {
-        match value {
-            TypeResp::IdentRef(ident) => Ok(TypeRespConcrete::IdentRef(ident)),
-            TypeResp::Void => Ok(TypeRespConcrete::Void),
-            TypeResp::IntLike | TypeResp::FloatLike | TypeResp::CharLike | TypeResp::BoolLike => {
-                Err(SymbolTableError::TypeError("Must be known".into()))
-            }
-            TypeResp::Pointer(is_mut, type_resp) => Ok(TypeRespConcrete::Pointer(
-                is_mut,
-                Box::new((*type_resp).try_into()?),
-            )),
-        }
-    }
-}
-
 impl From<TypeRespConcrete> for TypeResp {
     fn from(value: TypeRespConcrete) -> Self {
         match value {
@@ -408,6 +390,44 @@ macro_rules! is_type_resp {
 }
 
 impl TypeResp {
+    pub fn into_concrete(
+        &self,
+        type_defs: &SymbolTableType,
+    ) -> std::result::Result<TypeRespConcrete, SymbolTableError> {
+        match self {
+            TypeResp::IdentRef(ident) => Ok(TypeRespConcrete::IdentRef(ident.clone())),
+            TypeResp::Void => Ok(TypeRespConcrete::Void),
+            TypeResp::IntLike => type_defs
+                .default_int
+                .as_ref()
+                .cloned()
+                .map(|x| TypeRespConcrete::IdentRef(x))
+                .ok_or(SymbolTableError::TypeError("type must be known".into())),
+            TypeResp::FloatLike => type_defs
+                .default_float
+                .as_ref()
+                .cloned()
+                .map(|x| TypeRespConcrete::IdentRef(x))
+                .ok_or(SymbolTableError::TypeError("type must be known".into())),
+            TypeResp::CharLike => type_defs
+                .default_char
+                .as_ref()
+                .cloned()
+                .map(|x| TypeRespConcrete::IdentRef(x))
+                .ok_or(SymbolTableError::TypeError("type must be known".into())),
+            TypeResp::BoolLike => type_defs
+                .default_bool
+                .as_ref()
+                .cloned()
+                .map(|x| TypeRespConcrete::IdentRef(x))
+                .ok_or(SymbolTableError::TypeError("type must be known".into())),
+            TypeResp::Pointer(is_mut, type_resp) => Ok(TypeRespConcrete::Pointer(
+                *is_mut,
+                Box::new((*type_resp).into_concrete(type_defs)?),
+            )),
+        }
+    }
+
     pub fn into_pointer(self, mutable: bool) -> Self {
         Self::Pointer(mutable, Box::new(self))
     }
@@ -458,32 +478,7 @@ impl<'a> CompareTypes<'a, TypeRespConcrete> for TypeResp {
 
 impl<'a> CompareTypes<'a, TypeResp> for TypeRespConcrete {
     fn are_types_eq(&'a self, other: &'a TypeResp, type_defs: (&SymbolTableType, usize)) -> bool {
-        use TypeDefInfoType::*;
-        match (self, other) {
-            (TypeRespConcrete::Void, TypeResp::Void) => true,
-            (TypeRespConcrete::IdentRef(a), TypeResp::IdentRef(b)) => {
-                match (type_defs.get_until_root(a), type_defs.get_until_root(b)) {
-                    (Some(a), Some(b)) => a.are_types_eq(b, type_defs),
-                    _ => false,
-                }
-            }
-            (
-                TypeRespConcrete::IdentRef(ident),
-                l @ TypeResp::IntLike | l @ TypeResp::FloatLike,
-            ) => {
-                let datatype = type_defs.get_until_root(ident);
-
-                match datatype.map(|x| &x.type_info) {
-                    Some(TypeDefPrim(prim)) => TypeResp::from(prim.like) == *l,
-                    _ => false,
-                }
-            }
-            (TypeRespConcrete::Pointer(true, first), TypeResp::Pointer(true, second))
-            | (TypeRespConcrete::Pointer(false, first), TypeResp::Pointer(false, second)) => {
-                first.are_types_eq(second.as_ref(), type_defs)
-            }
-            _ => false,
-        }
+        TypeResp::from(self.clone()).are_types_eq(other, type_defs)
     }
 }
 
@@ -493,7 +488,9 @@ impl<'a> CompareTypes<'a, TypeResp> for TypeResp {
         match (self, other) {
             (TypeResp::Void, TypeResp::Void)
             | (TypeResp::IntLike, TypeResp::IntLike)
-            | (TypeResp::FloatLike, TypeResp::FloatLike) => true,
+            | (TypeResp::FloatLike, TypeResp::FloatLike)
+            | (TypeResp::CharLike, TypeResp::CharLike)
+            | (TypeResp::BoolLike, TypeResp::BoolLike) => true,
             (TypeResp::IdentRef(a), TypeResp::IdentRef(b)) => {
                 match (type_defs.get_until_root(a), type_defs.get_until_root(b)) {
                     (Some(a), Some(b)) => a.are_types_eq(b, type_defs),
@@ -501,8 +498,20 @@ impl<'a> CompareTypes<'a, TypeResp> for TypeResp {
                 }
             }
 
-            (TypeResp::IdentRef(ident), l @ TypeResp::IntLike | l @ TypeResp::FloatLike)
-            | (l @ TypeResp::IntLike | l @ TypeResp::FloatLike, TypeResp::IdentRef(ident)) => {
+            (
+                TypeResp::IdentRef(ident),
+                l @ TypeResp::IntLike
+                | l @ TypeResp::FloatLike
+                | l @ TypeResp::BoolLike
+                | l @ TypeResp::CharLike,
+            )
+            | (
+                l @ TypeResp::IntLike
+                | l @ TypeResp::FloatLike
+                | l @ TypeResp::BoolLike
+                | l @ TypeResp::CharLike,
+                TypeResp::IdentRef(ident),
+            ) => {
                 let datatype = type_defs.get_until_root(ident);
 
                 match datatype.map(|x| &x.type_info) {
@@ -514,6 +523,7 @@ impl<'a> CompareTypes<'a, TypeResp> for TypeResp {
             | (TypeResp::Pointer(false, first), TypeResp::Pointer(false, second)) => {
                 first.are_types_eq(second.as_ref(), type_defs)
             }
+
             _ => false,
         }
     }

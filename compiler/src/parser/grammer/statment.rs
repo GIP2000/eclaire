@@ -51,88 +51,9 @@ impl Statment {
                             )?;
                         }
                         (Some(assignment_expr), Some(type_name))
-                            if {
-                                assignment_expr
-                                    .get_type(type_defs, decls, func_ret_type)?
-                                    .are_types_eq(type_name, type_defs)
-
-                                // let type_resp =
-                                //     assignment_expr.get_type(type_defs, decls, func_ret_type)?;
-                                //
-                                // match &type_resp.get_root_type() {
-                                //     TypeResp::Pointer(_, _) => unreachable!("I got the root type"),
-                                //     x @ TypeResp::IdentRef(_) => {
-                                //         x.are_types_eq(type_name, type_defs)
-                                //     }
-                                //     TypeResp::Void => {
-                                //         unimplemented!("figure out how to handle void type")
-                                //     }
-                                //     TypeResp::IntLike => {
-                                //         let type_data = type_defs.get_until_root(type_name).ok_or(
-                                //             SymbolTableError::TypeError(
-                                //                 format!("Type `{}` not found", type_name).into(),
-                                //             ),
-                                //         )?;
-                                //
-                                //         matches!(
-                                //             type_data.type_info,
-                                //             TypeDefInfoType::TypeDefPrim(PrimativeType {
-                                //                 size: _,
-                                //                 like: PrimativeLike::UInt | PrimativeLike::SInt,
-                                //                 is_default: _
-                                //             })
-                                //         )
-                                //     }
-                                //     TypeResp::FloatLike => {
-                                //         let type_data = type_defs.get_until_root(type_name).ok_or(
-                                //             SymbolTableError::TypeError(
-                                //                 format!("Type `{}` not found", type_name).into(),
-                                //             ),
-                                //         )?;
-                                //
-                                //         matches!(
-                                //             type_data.type_info,
-                                //             TypeDefInfoType::TypeDefPrim(PrimativeType {
-                                //                 size: _,
-                                //                 like: PrimativeLike::Float,
-                                //                 is_default: _
-                                //             })
-                                //         )
-                                //     }
-                                //     TypeResp::CharLike => {
-                                //         let type_data = type_defs.get_until_root(type_name).ok_or(
-                                //             SymbolTableError::TypeError(
-                                //                 format!("Type `{}` not found", type_name).into(),
-                                //             ),
-                                //         )?;
-                                //
-                                //         matches!(
-                                //             type_data.type_info,
-                                //             TypeDefInfoType::TypeDefPrim(PrimativeType {
-                                //                 size: _,
-                                //                 like: PrimativeLike::Char,
-                                //                 is_default: _
-                                //             })
-                                //         )
-                                //     }
-                                //     TypeResp::BoolLike => {
-                                //         let type_data = type_defs.get_until_root(type_name).ok_or(
-                                //             SymbolTableError::TypeError(
-                                //                 format!("Type `{}` not found", type_name).into(),
-                                //             ),
-                                //         )?;
-                                //
-                                //         matches!(
-                                //             type_data.type_info,
-                                //             TypeDefInfoType::TypeDefPrim(PrimativeType {
-                                //                 size: _,
-                                //                 like: PrimativeLike::Bool,
-                                //                 is_default: _
-                                //             })
-                                //         )
-                                //     }
-                                // }
-                            } =>
+                            if assignment_expr
+                                .get_type(type_defs, decls, func_ret_type)?
+                                .are_types_eq(type_name, type_defs) =>
                         {
                             decls.insert(
                                 assignment.ident.clone(),
@@ -142,7 +63,7 @@ impl Statment {
                         // TODO: put a better error
                         (Some(_), Some(_)) | (None, None) => {
                             return Err(SymbolTableError::TypeError(
-                                "Not enough info to make an infrence".into(),
+                                "Not enough info to make an inference".into(),
                             ));
                         }
                     }

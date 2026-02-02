@@ -103,19 +103,13 @@ impl Parse for TypeRespConcrete {
 
             LexToken::AmpersandAmpersand => {
                 let is_mut = token_stream.next_matches(LexToken::Mut).is_ok();
-                let next_parse = token_stream.parse(symbol_table).map_err(|err| {
-                    debug!("ERROR finding next = {err:?}");
-                    err
-                })?;
+                let next_parse = token_stream.parse(symbol_table).map_err(|err| err)?;
                 Self::Pointer(false, Box::new(Self::Pointer(is_mut, Box::new(next_parse))))
             }
 
             LexToken::Ampersand => {
                 let is_mut = token_stream.next_matches(LexToken::Mut).is_ok();
-                let next_parse = token_stream.parse(symbol_table).map_err(|err| {
-                    debug!("ERROR finding next = {err:?}");
-                    err
-                })?;
+                let next_parse = token_stream.parse(symbol_table)?;
                 Self::Pointer(is_mut, Box::new(next_parse))
             }
             _ => unreachable!(),

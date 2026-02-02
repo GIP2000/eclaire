@@ -98,38 +98,7 @@ impl SymbolTableDecl {
         is_mut: bool,
         type_defs: &SymbolTableType,
     ) -> Result<()> {
-        self.insert(
-            key,
-            match resp {
-                TypeResp::IdentRef(ident) => Ok(DeclNode::new(ident.into(), is_mut)),
-                TypeResp::Void => Ok(DeclNode::new(TypeRespConcrete::Void, is_mut)),
-                TypeResp::IntLike => type_defs
-                    .default_int
-                    .as_ref()
-                    .cloned()
-                    .map(|x| DeclNode::new(x.into(), is_mut))
-                    .ok_or(SymbolTableError::TypeError("No default Int set".into())),
-                TypeResp::FloatLike => type_defs
-                    .default_float
-                    .as_ref()
-                    .cloned()
-                    .map(|x| DeclNode::new(x.into(), is_mut))
-                    .ok_or(SymbolTableError::TypeError("No default Float set".into())),
-                TypeResp::CharLike => type_defs
-                    .default_char
-                    .as_ref()
-                    .cloned()
-                    .map(|x| DeclNode::new(x.into(), is_mut))
-                    .ok_or(SymbolTableError::TypeError("No default Float set".into())),
-                TypeResp::BoolLike => type_defs
-                    .default_bool
-                    .as_ref()
-                    .cloned()
-                    .map(|x| DeclNode::new(x.into(), is_mut))
-                    .ok_or(SymbolTableError::TypeError("No default Float set".into())),
-                x @ TypeResp::Pointer(_, _) => Ok(DeclNode::new(x.try_into()?, is_mut)),
-            }?,
-        )
+        self.insert(key, DeclNode::new(resp.into_concrete(type_defs)?, is_mut))
     }
 }
 
