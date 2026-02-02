@@ -3,10 +3,8 @@ use std::fmt::Debug;
 
 use thiserror::Error;
 
-use crate::parser::grammer::assignment::AssignmentType;
+use crate::parser::grammer::assignment::TypeRespConcrete;
 use crate::parser::grammer::expression::TypeResp;
-use crate::parser::grammer::statment::Statment;
-use crate::parser::grammer::structures::PrimativeLike;
 use crate::{
     info,
     parser::grammer::{expression::TypeDef, ident::Ident},
@@ -59,23 +57,19 @@ impl SymbolTableTypePair for (&SymbolTableType, usize) {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+
 pub struct DeclNode {
-    pub ident: Ident,
+    pub type_resp: TypeRespConcrete,
     pub is_mut: bool,
 }
 
 impl DeclNode {
-    pub fn new(ident: Ident, is_mut: bool) -> Self {
-        Self { ident, is_mut }
+    pub fn new(type_resp: TypeRespConcrete, is_mut: bool) -> Self {
+        Self { type_resp, is_mut }
     }
-}
 
-impl From<Ident> for DeclNode {
-    fn from(value: Ident) -> Self {
-        Self {
-            ident: value,
-            is_mut: false,
-        }
+    pub fn is_mut(&self) -> bool {
+        self.is_mut
     }
 }
 
@@ -96,15 +90,64 @@ impl<V> Default for SymbolTable<V> {
     }
 }
 
+impl SymbolTableDecl {
+    pub fn insert_from_resp(
+        &mut self,
+        key: Ident,
+        resp: TypeResp,
+        is_mut: bool,
+        type_defs: &SymbolTableType,
+    ) -> Result<()> {
+        self.insert(
+            key,
+            match resp {
+                TypeResp::IdentRef(ident) => Ok(DeclNode::new(ident.into(), is_mut)),
+                TypeResp::Void => Ok(DeclNode::new(TypeRespConcrete::Void, is_mut)),
+                TypeResp::IntLike => type_defs
+                    .default_int
+                    .as_ref()
+                    .cloned()
+                    .map(|x| DeclNode::new(x.into(), is_mut))
+                    .ok_or(SymbolTableError::TypeError("No default Int set".into())),
+                TypeResp::FloatLike => type_defs
+                    .default_float
+                    .as_ref()
+                    .cloned()
+                    .map(|x| DeclNode::new(x.into(), is_mut))
+                    .ok_or(SymbolTableError::TypeError("No default Float set".into())),
+                TypeResp::CharLike => type_defs
+                    .default_char
+                    .as_ref()
+                    .cloned()
+                    .map(|x| DeclNode::new(x.into(), is_mut))
+                    .ok_or(SymbolTableError::TypeError("No default Float set".into())),
+                TypeResp::BoolLike => type_defs
+                    .default_bool
+                    .as_ref()
+                    .cloned()
+                    .map(|x| DeclNode::new(x.into(), is_mut))
+                    .ok_or(SymbolTableError::TypeError("No default Float set".into())),
+                x @ TypeResp::Pointer(_, _) => Ok(DeclNode::new(x.try_into()?, is_mut)),
+            }?,
+        )
+    }
+}
+
 impl SymbolTableType {
     pub fn get_as_until_root(&self, ident: &Ident, table_idx: usize) -> Option<&TypeDef> {
         let result = self.get_as(ident, table_idx)?;
+
         match &result.type_info {
             TypeDefInfoType::Function(_)
             | TypeDefInfoType::Struct(_)
             | TypeDefInfoType::Enum(_)
-            | TypeDefInfoType::TypeDefPrim(_) => Some(result),
-            TypeDefInfoType::TypeDefAlias(alias) => self.get_as_until_root(alias, table_idx),
+            | TypeDefInfoType::TypeDefPrim(_)
+            | TypeDefInfoType::TypeDefAlias(
+                TypeRespConcrete::Void | TypeRespConcrete::Pointer(_, _), // this pointer thing might break...
+            ) => Some(result),
+            TypeDefInfoType::TypeDefAlias(TypeRespConcrete::IdentRef(alias)) => {
+                self.get_as_until_root(alias, table_idx)
+            }
         }
     }
 
@@ -134,7 +177,7 @@ impl SymbolTableType {
             let _decl_idx = decls.push();
 
             for arg in f.args.iter() {
-                decls.insert(arg.name.clone(), arg.datatype.clone().into())?;
+                decls.insert(arg.name.clone(), DeclNode::new(arg.datatype.clone(), false))?;
             }
 
             let f_ret_name = f
@@ -155,8 +198,8 @@ impl SymbolTableType {
     }
 }
 
-pub trait CompareTypes {
-    fn are_types_eq(&self, other: &Self, type_defs: (&SymbolTableType, usize)) -> bool;
+pub trait CompareTypes<'a, Rhs> {
+    fn are_types_eq(&'a self, other: &'a Rhs, type_defs: (&SymbolTableType, usize)) -> bool;
 }
 
 impl<V> SymbolTable<V>

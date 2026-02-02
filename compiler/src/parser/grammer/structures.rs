@@ -2,10 +2,11 @@ use crate::{
     lexer::LexToken,
     parser::{
         grammer::{
+            assignment::TypeRespConcrete,
             expression::TypeResp,
             ident::{Ident, IdentPair},
         },
-        symbol_table::{CompareTypes, SymbolTableType, SymbolTableTypePair},
+        symbol_table::{CompareTypes, SymbolTableType},
         Parse, ParseIntoWith, ParserInto, Result,
     },
     utils::iterator::IterPlusError,
@@ -31,16 +32,14 @@ pub struct Struct {
     pub fields: Vec<IdentPair>,
 }
 
-impl CompareTypes for Struct {
-    fn are_types_eq(&self, other: &Self, type_defs: (&SymbolTableType, usize)) -> bool {
+impl<'a> CompareTypes<'a, Struct> for Struct {
+    fn are_types_eq(&'a self, other: &'a Self, type_defs: (&SymbolTableType, usize)) -> bool {
         self.fields
             .iter()
             .zip(other.fields.iter())
             .all(|(field_a, field_b)| {
-                let datatype_a = type_defs.get_until_root(&field_a.datatype);
-                let datatype_b = type_defs.get_until_root(&field_b.datatype);
-
-                field_a.name == field_b.name && datatype_a.are_types_eq(&datatype_b, type_defs)
+                field_a.name == field_b.name
+                    && field_a.datatype.are_types_eq(&field_b.datatype, type_defs)
             })
     }
 }
@@ -63,8 +62,8 @@ pub struct Enum {
     pub variants: Vec<(Ident, EnumVariantTypes)>,
 }
 
-impl CompareTypes for Enum {
-    fn are_types_eq(&self, other: &Self, type_defs: (&SymbolTableType, usize)) -> bool {
+impl<'a> CompareTypes<'a, Enum> for Enum {
+    fn are_types_eq(&'a self, other: &'a Self, type_defs: (&SymbolTableType, usize)) -> bool {
         self.variants.iter().zip(other.variants.iter()).all(
             |((ident_a, variant_type_a), (ident_b, variant_type_b))| {
                 if ident_a != ident_b {
@@ -74,19 +73,15 @@ impl CompareTypes for Enum {
                 use EnumVariantTypes::*;
 
                 match (variant_type_a, variant_type_b) {
-                    (Tuple(t1), Tuple(t2)) => t1.iter().zip(t2.iter()).all(|(type_a, type_b)| {
-                        let datatype_a = type_defs.get_until_root(type_a);
-                        let datatype_b = type_defs.get_until_root(type_b);
-                        datatype_a.are_types_eq(&datatype_b, type_defs)
-                    }),
+                    (Tuple(t1), Tuple(t2)) => t1
+                        .iter()
+                        .zip(t2.iter())
+                        .all(|(type_a, type_b)| type_a.are_types_eq(type_b, type_defs)),
                     (Struct(s1), Struct(s2)) => s1.iter().zip(s2.iter()).all(|(a, b)| {
                         if a.name != b.name {
                             return false;
                         }
-                        let datatype_a = type_defs.get_until_root(&a.datatype);
-                        let datatype_b = type_defs.get_until_root(&b.datatype);
-
-                        datatype_a.are_types_eq(&datatype_b, type_defs)
+                        a.datatype.are_types_eq(&b.datatype, type_defs)
                     }),
                     (None, None) => true,
                     _ => false,
@@ -114,9 +109,9 @@ impl Parse for Enum {
 
                         let IterPlusError(tuple_types, following) = token_stream
                             .parse_with_many(symbol_table, |token_stream, symbol_table| {
-                                let ident: Ident = token_stream.parse(symbol_table)?;
+                                let type_name = token_stream.parse(symbol_table)?;
                                 _ = token_stream.next_matches(LexToken::Comma);
-                                Ok(ident)
+                                Ok(type_name)
                             })
                             .collect();
 
@@ -150,7 +145,7 @@ impl Parse for Enum {
 #[derive(Debug, Clone)]
 pub enum EnumVariantTypes {
     None,
-    Tuple(Vec<Ident>),
+    Tuple(Vec<TypeRespConcrete>),
     Struct(Vec<IdentPair>),
 }
 

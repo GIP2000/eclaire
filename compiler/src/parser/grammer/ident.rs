@@ -4,7 +4,10 @@ use lexer::LexerIterator;
 
 use crate::{
     lexer::{LexToken, MyLexerError},
-    parser::{symbol_table::SymbolTableType, Parse, ParserInto, Result},
+    parser::{
+        grammer::assignment::TypeRespConcrete, symbol_table::SymbolTableType, Parse, ParserInto,
+        Result,
+    },
     trace,
 };
 
@@ -62,7 +65,7 @@ impl Parse for Ident {
 #[derive(Debug, Clone, PartialEq)]
 pub struct IdentPair {
     pub name: Ident,
-    pub datatype: Ident,
+    pub datatype: TypeRespConcrete,
 }
 
 impl Parse for IdentPair {
@@ -79,7 +82,7 @@ impl Parse for IdentPair {
     }
 }
 
-impl Parse for (Ident, Option<Ident>) {
+impl Parse for (Ident, Option<TypeRespConcrete>) {
     fn from_lexer<'a>(
         token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
         symbol_table: &mut SymbolTableType,

@@ -4,6 +4,7 @@ use crate::{
     lexer::{LexToken, MyLexerError},
     parser::{
         grammer::{
+            assignment::TypeRespConcrete,
             statment::Statment,
             structures::{Enum, PrimativeLike, PrimativeType, Struct},
             Function,
@@ -27,7 +28,7 @@ pub enum TypeDefInfoType {
     Struct(Struct),
     Enum(Enum),
     TypeDefPrim(PrimativeType),
-    TypeDefAlias(Ident),
+    TypeDefAlias(TypeRespConcrete),
 }
 
 #[derive(Debug, Clone)]
@@ -36,17 +37,44 @@ pub struct TypeDef {
     pub type_info: TypeDefInfoType,
 }
 
-impl CompareTypes for Option<&TypeDef> {
-    fn are_types_eq(&self, other: &Self, type_defs: (&SymbolTableType, usize)) -> bool {
+impl<'a> CompareTypes<'a, Option<&'a TypeDef>> for Option<&'a TypeDef> {
+    fn are_types_eq(&'a self, other: &'a Self, type_defs: (&SymbolTableType, usize)) -> bool {
         match (self, other) {
-            (Some(a), Some(b)) => a.are_types_eq(b, type_defs),
+            (Some(a), Some(b)) => a.are_types_eq(*b, type_defs),
             _ => false,
         }
     }
 }
 
-impl CompareTypes for TypeDef {
-    fn are_types_eq(&self, other: &Self, type_defs: (&SymbolTableType, usize)) -> bool {
+impl<'a> CompareTypes<'a, TypeDef> for TypeRespConcrete {
+    fn are_types_eq(&'a self, other: &'a TypeDef, type_defs: (&SymbolTableType, usize)) -> bool {
+        other.are_types_eq(self, type_defs)
+    }
+}
+
+impl<'a> CompareTypes<'a, TypeRespConcrete> for TypeDef {
+    fn are_types_eq(
+        &'a self,
+        other: &'a TypeRespConcrete,
+        type_defs: (&SymbolTableType, usize),
+    ) -> bool {
+        match (other, &self.type_info) {
+            (TypeRespConcrete::IdentRef(ident), _) => type_defs
+                .get_until_root(ident)
+                .are_types_eq(&Some(self), type_defs),
+            (TypeRespConcrete::Void, TypeDefInfoType::TypeDefAlias(TypeRespConcrete::Void)) => true,
+            (TypeRespConcrete::Void, _) => false,
+            (
+                TypeRespConcrete::Pointer(is_mut1, a),
+                TypeDefInfoType::TypeDefAlias(TypeRespConcrete::Pointer(is_mut2, b)),
+            ) => is_mut1 == is_mut2 && a.are_types_eq(b.as_ref(), type_defs),
+            (TypeRespConcrete::Pointer(_, _), _) => false,
+        }
+    }
+}
+
+impl<'a> CompareTypes<'a, TypeDef> for TypeDef {
+    fn are_types_eq(&'a self, other: &'a Self, type_defs: (&SymbolTableType, usize)) -> bool {
         if self.size_bits != other.size_bits {
             return false;
         }
@@ -54,10 +82,18 @@ impl CompareTypes for TypeDef {
         use TypeDefInfoType::*;
 
         match (&self.type_info, &other.type_info) {
-            (TypeDefAlias(ident), _) | (_, TypeDefAlias(ident)) => {
-                let val = type_defs.get_until_root(ident);
-                val.are_types_eq(&Some(other), type_defs)
-            }
+            (
+                TypeDefAlias(TypeRespConcrete::Pointer(is_mut1, a)),
+                TypeDefAlias(TypeRespConcrete::Pointer(is_mut2, b)),
+            ) => is_mut1 == is_mut2 && a.are_types_eq(b.as_ref(), type_defs),
+            (TypeDefAlias(alias), _) | (_, TypeDefAlias(alias)) => match alias {
+                TypeRespConcrete::IdentRef(ident) => {
+                    let val = type_defs.get_until_root(ident);
+                    val.are_types_eq(&Some(other), type_defs)
+                }
+                x @ TypeRespConcrete::Void => x.are_types_eq(other, type_defs),
+                TypeRespConcrete::Pointer(_, _) => false,
+            },
             (Struct(s1), Struct(s2)) => s1.are_types_eq(s2, type_defs),
             (Enum(e1), Enum(e2)) => e1.are_types_eq(e2, type_defs),
             (TypeDefPrim(p1), TypeDefPrim(p2)) => p1 == p2,
@@ -103,9 +139,24 @@ impl Parse for TypeDef {
                     })
             })
             .or_else(|_| {
-                token_stream.parse(symbol_table).map(|x: Ident| Self {
-                    size_bits: 0,
-                    type_info: TypeDefInfoType::TypeDefAlias(x),
+                token_stream.parse_with(symbol_table, |token_stream, symbol_table| {
+                    let lst: Box<_> = token_stream
+                        .parse_with_many(symbol_table, |token_stream, symbol_table| {
+                            token_stream.next_matches(LexToken::Ampersand)?;
+                            Ok(token_stream.next_matches(LexToken::Mut).is_ok())
+                        })
+                        .map_while(Result::ok)
+                        .collect();
+
+                    let type_info = lst.into_iter().fold(
+                        TypeRespConcrete::IdentRef(token_stream.parse(symbol_table)?),
+                        |acc, val| TypeRespConcrete::Pointer(val, Box::new(acc)),
+                    );
+
+                    Ok(Self {
+                        size_bits: 0,
+                        type_info: TypeDefInfoType::TypeDefAlias(type_info),
+                    })
                 })
             })
     }
@@ -298,6 +349,37 @@ pub enum TypeResp {
     FloatLike,
     CharLike,
     BoolLike,
+    Pointer(bool, Box<TypeResp>),
+}
+
+impl TryFrom<TypeResp> for TypeRespConcrete {
+    type Error = SymbolTableError;
+
+    fn try_from(value: TypeResp) -> std::result::Result<Self, Self::Error> {
+        match value {
+            TypeResp::IdentRef(ident) => Ok(TypeRespConcrete::IdentRef(ident)),
+            TypeResp::Void => Ok(TypeRespConcrete::Void),
+            TypeResp::IntLike | TypeResp::FloatLike | TypeResp::CharLike | TypeResp::BoolLike => {
+                Err(SymbolTableError::TypeError("Must be known".into()))
+            }
+            TypeResp::Pointer(is_mut, type_resp) => Ok(TypeRespConcrete::Pointer(
+                is_mut,
+                Box::new((*type_resp).try_into()?),
+            )),
+        }
+    }
+}
+
+impl From<TypeRespConcrete> for TypeResp {
+    fn from(value: TypeRespConcrete) -> Self {
+        match value {
+            TypeRespConcrete::IdentRef(ident) => Self::IdentRef(ident),
+            TypeRespConcrete::Void => Self::Void,
+            TypeRespConcrete::Pointer(is_mut, resp) => {
+                Self::Pointer(is_mut, Box::new((*resp).into()))
+            }
+        }
+    }
 }
 
 macro_rules! is_type_resp {
@@ -326,6 +408,21 @@ macro_rules! is_type_resp {
 }
 
 impl TypeResp {
+    pub fn into_pointer(self, mutable: bool) -> Self {
+        Self::Pointer(mutable, Box::new(self))
+    }
+
+    pub fn get_root_type(&self) -> &Self {
+        let mut val = self;
+        loop {
+            match val {
+                // tail recursion is dumb and stupid
+                TypeResp::Pointer(_, x) => val = x.as_ref(),
+                x => return x,
+            }
+        }
+    }
+
     pub fn is_int(&self, type_defs: (&SymbolTableType, usize)) -> bool {
         is_type_resp!(
             self,
@@ -348,8 +445,50 @@ impl TypeResp {
     }
 }
 
-impl CompareTypes for TypeResp {
-    fn are_types_eq(&self, other: &Self, type_defs: (&SymbolTableType, usize)) -> bool {
+impl<'a> CompareTypes<'a, TypeRespConcrete> for TypeResp {
+    #[inline(always)]
+    fn are_types_eq(
+        &'a self,
+        other: &'a TypeRespConcrete,
+        type_defs: (&SymbolTableType, usize),
+    ) -> bool {
+        other.are_types_eq(self, type_defs)
+    }
+}
+
+impl<'a> CompareTypes<'a, TypeResp> for TypeRespConcrete {
+    fn are_types_eq(&'a self, other: &'a TypeResp, type_defs: (&SymbolTableType, usize)) -> bool {
+        use TypeDefInfoType::*;
+        match (self, other) {
+            (TypeRespConcrete::Void, TypeResp::Void) => true,
+            (TypeRespConcrete::IdentRef(a), TypeResp::IdentRef(b)) => {
+                match (type_defs.get_until_root(a), type_defs.get_until_root(b)) {
+                    (Some(a), Some(b)) => a.are_types_eq(b, type_defs),
+                    _ => false,
+                }
+            }
+            (
+                TypeRespConcrete::IdentRef(ident),
+                l @ TypeResp::IntLike | l @ TypeResp::FloatLike,
+            ) => {
+                let datatype = type_defs.get_until_root(ident);
+
+                match datatype.map(|x| &x.type_info) {
+                    Some(TypeDefPrim(prim)) => TypeResp::from(prim.like) == *l,
+                    _ => false,
+                }
+            }
+            (TypeRespConcrete::Pointer(true, first), TypeResp::Pointer(true, second))
+            | (TypeRespConcrete::Pointer(false, first), TypeResp::Pointer(false, second)) => {
+                first.are_types_eq(second.as_ref(), type_defs)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl<'a> CompareTypes<'a, TypeResp> for TypeResp {
+    fn are_types_eq(&'a self, other: &'a Self, type_defs: (&SymbolTableType, usize)) -> bool {
         use TypeDefInfoType::*;
         match (self, other) {
             (TypeResp::Void, TypeResp::Void)
@@ -370,6 +509,10 @@ impl CompareTypes for TypeResp {
                     Some(TypeDefPrim(prim)) => TypeResp::from(prim.like) == *l,
                     _ => false,
                 }
+            }
+            (TypeResp::Pointer(true, first), TypeResp::Pointer(true, second))
+            | (TypeResp::Pointer(false, first), TypeResp::Pointer(false, second)) => {
+                first.are_types_eq(second.as_ref(), type_defs)
             }
             _ => false,
         }
@@ -422,7 +565,7 @@ impl Expression {
                                                 x => Ok(x),
                                             })
                                             .zip(f.args.iter().map(|x| &x.datatype))
-                                            .all(|(a, b)| matches!((a,b), (Ok(a), b) if a.are_types_eq(&TypeResp::IdentRef(b.clone()), type_defs)))
+                                            .all(|(a, b)| matches!((a,b), (Ok(a), b) if a.are_types_eq(b, type_defs)))
                                         {
                                             Ok(f.ret
                                                 .as_ref()
@@ -455,9 +598,11 @@ impl Expression {
                                     format!("Type `{}` not found", ident).into(),
                                 ))
                                 .and_then(|decl| {
-                                    decl.is_mut.then_some(()).ok_or(SymbolTableError::TypeError(
-                                        "Type must be mut in order to change value".into(),
-                                    ))
+                                    decl.is_mut()
+                                        .then_some(())
+                                        .ok_or(SymbolTableError::TypeError(
+                                            "Type must be mut in order to change value".into(),
+                                        ))
                                 })?
                         } else {
                             // TODO: implement mutable refrences
@@ -500,6 +645,16 @@ impl Expression {
                         .then_some(x)
                         .ok_or(SymbolTableError::TypeError("Must be a bool".into()))
                 }),
+
+            Expression::UnaryOp(UnaryOperator::FromPointer, expr) => expr
+                .get_type(type_defs, decls, func_ret_type)
+                .and_then(|x| match x {
+                    TypeResp::Pointer(_, type_resp) => Ok(*type_resp),
+                    _ => Err(SymbolTableError::TypeError("type must be a pointer".into())),
+                }),
+            Expression::UnaryOp(UnaryOperator::IntoPointer, expr) => expr
+                .get_type(type_defs, decls, func_ret_type)
+                .map(|x| TypeResp::Pointer(false, Box::new(x))), // TODO: handle `& mut` vs `&`
             Expression::UnaryOp(_, expr) => expr.get_type(type_defs, decls, func_ret_type),
             Expression::List(_) => Err(SymbolTableError::TypeError(
                 "Can't have a naked list".into(),
@@ -507,7 +662,7 @@ impl Expression {
             Expression::Ident(ident) => decls
                 .get(ident)
                 .cloned()
-                .map(|x| x.ident.into())
+                .map(|x| x.type_resp.into())
                 .ok_or(SymbolTableError::TypeError("Idents must be declard".into())),
             Expression::Constant(ConstantExpression::IntLit(_)) => Ok(TypeResp::IntLike),
             Expression::Constant(ConstantExpression::FloatLit(_)) => Ok(TypeResp::FloatLike),
@@ -662,14 +817,16 @@ impl Expression {
         symbol_table: &mut SymbolTableType,
     ) -> Result<Expression> {
         trace!("Entering Unary expression");
-        let op: Option<UnaryOperator> = token_stream.parse(symbol_table).ok();
+        let op: Box<[UnaryOperator]> = token_stream
+            .parse_many(symbol_table)
+            .map_while(Result::ok)
+            .collect();
 
         let expr = token_stream.parse_with(symbol_table, Self::postfix_expression)?;
 
-        Ok(match op {
-            Some(x) => Expression::UnaryOp(x, Box::new(expr)),
-            None => expr,
-        })
+        Ok(op
+            .into_iter()
+            .fold(expr, |acc, val| Expression::UnaryOp(val, Box::new(acc))))
     }
 
     fn multiplicative_expression<'a>(

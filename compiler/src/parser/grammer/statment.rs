@@ -38,40 +38,15 @@ impl Statment {
             Statment::Assignment(assignment) => match assignment.assignment_type {
                 AssignmentType::Let(is_mut) => {
                     match (assignment.expr.as_ref(), assignment.data_type.as_ref()) {
-                        (Some(expr), None) => {
-                            let typeresp = expr.get_type(type_defs, decls, func_ret_type)?;
+                        (Some(assignment_expr), None) => {
+                            let typeresp =
+                                assignment_expr.get_type(type_defs, decls, func_ret_type)?;
 
-                            let type_resp_ident = match typeresp {
-                                TypeResp::IdentRef(ident) => ident,
-                                TypeResp::Void => {
-                                    return Err(SymbolTableError::TypeError(
-                                        "Can't assign variable to void type".into(),
-                                    ))
-                                }
-                                TypeResp::IntLike => {
-                                    type_defs.0.default_int.as_ref().cloned().ok_or(
-                                        SymbolTableError::TypeError("No default Int set".into()),
-                                    )?
-                                }
-                                TypeResp::FloatLike => {
-                                    type_defs.0.default_float.as_ref().cloned().ok_or(
-                                        SymbolTableError::TypeError("No default Float set".into()),
-                                    )?
-                                }
-                                TypeResp::CharLike => {
-                                    type_defs.0.default_char.as_ref().cloned().ok_or(
-                                        SymbolTableError::TypeError("No default Float set".into()),
-                                    )?
-                                }
-                                TypeResp::BoolLike => {
-                                    type_defs.0.default_bool.as_ref().cloned().ok_or(
-                                        SymbolTableError::TypeError("No default Float set".into()),
-                                    )?
-                                }
-                            };
-                            decls.insert(
+                            decls.insert_from_resp(
                                 assignment.ident.clone(),
-                                DeclNode::new(type_resp_ident, is_mut),
+                                typeresp,
+                                is_mut,
+                                type_defs.0,
                             )?;
                         }
                         (None, Some(type_name)) => {
@@ -80,80 +55,88 @@ impl Statment {
                                 DeclNode::new(type_name.clone(), is_mut),
                             )?;
                         }
-                        (Some(expr), Some(type_name))
+                        (Some(assignment_expr), Some(type_name))
                             if {
-                                let type_resp = expr.get_type(type_defs, decls, func_ret_type)?;
+                                assignment_expr
+                                    .get_type(type_defs, decls, func_ret_type)?
+                                    .are_types_eq(type_name, type_defs)
 
-                                match &type_resp {
-                                    TypeResp::IdentRef(ident) => ident == type_name,
-                                    TypeResp::Void => {
-                                        unimplemented!("figure out how to handle void type")
-                                    }
-                                    TypeResp::IntLike => {
-                                        let type_data = type_defs.get_until_root(type_name).ok_or(
-                                            SymbolTableError::TypeError(
-                                                format!("Type `{}` not found", type_name).into(),
-                                            ),
-                                        )?;
-
-                                        matches!(
-                                            type_data.type_info,
-                                            TypeDefInfoType::TypeDefPrim(PrimativeType {
-                                                size: _,
-                                                like: PrimativeLike::UInt | PrimativeLike::SInt,
-                                                is_default: _
-                                            })
-                                        )
-                                    }
-                                    TypeResp::FloatLike => {
-                                        let type_data = type_defs.get_until_root(type_name).ok_or(
-                                            SymbolTableError::TypeError(
-                                                format!("Type `{}` not found", type_name).into(),
-                                            ),
-                                        )?;
-
-                                        matches!(
-                                            type_data.type_info,
-                                            TypeDefInfoType::TypeDefPrim(PrimativeType {
-                                                size: _,
-                                                like: PrimativeLike::Float,
-                                                is_default: _
-                                            })
-                                        )
-                                    }
-                                    TypeResp::CharLike => {
-                                        let type_data = type_defs.get_until_root(type_name).ok_or(
-                                            SymbolTableError::TypeError(
-                                                format!("Type `{}` not found", type_name).into(),
-                                            ),
-                                        )?;
-
-                                        matches!(
-                                            type_data.type_info,
-                                            TypeDefInfoType::TypeDefPrim(PrimativeType {
-                                                size: _,
-                                                like: PrimativeLike::Char,
-                                                is_default: _
-                                            })
-                                        )
-                                    }
-                                    TypeResp::BoolLike => {
-                                        let type_data = type_defs.get_until_root(type_name).ok_or(
-                                            SymbolTableError::TypeError(
-                                                format!("Type `{}` not found", type_name).into(),
-                                            ),
-                                        )?;
-
-                                        matches!(
-                                            type_data.type_info,
-                                            TypeDefInfoType::TypeDefPrim(PrimativeType {
-                                                size: _,
-                                                like: PrimativeLike::Bool,
-                                                is_default: _
-                                            })
-                                        )
-                                    }
-                                }
+                                // let type_resp =
+                                //     assignment_expr.get_type(type_defs, decls, func_ret_type)?;
+                                //
+                                // match &type_resp.get_root_type() {
+                                //     TypeResp::Pointer(_, _) => unreachable!("I got the root type"),
+                                //     x @ TypeResp::IdentRef(_) => {
+                                //         x.are_types_eq(type_name, type_defs)
+                                //     }
+                                //     TypeResp::Void => {
+                                //         unimplemented!("figure out how to handle void type")
+                                //     }
+                                //     TypeResp::IntLike => {
+                                //         let type_data = type_defs.get_until_root(type_name).ok_or(
+                                //             SymbolTableError::TypeError(
+                                //                 format!("Type `{}` not found", type_name).into(),
+                                //             ),
+                                //         )?;
+                                //
+                                //         matches!(
+                                //             type_data.type_info,
+                                //             TypeDefInfoType::TypeDefPrim(PrimativeType {
+                                //                 size: _,
+                                //                 like: PrimativeLike::UInt | PrimativeLike::SInt,
+                                //                 is_default: _
+                                //             })
+                                //         )
+                                //     }
+                                //     TypeResp::FloatLike => {
+                                //         let type_data = type_defs.get_until_root(type_name).ok_or(
+                                //             SymbolTableError::TypeError(
+                                //                 format!("Type `{}` not found", type_name).into(),
+                                //             ),
+                                //         )?;
+                                //
+                                //         matches!(
+                                //             type_data.type_info,
+                                //             TypeDefInfoType::TypeDefPrim(PrimativeType {
+                                //                 size: _,
+                                //                 like: PrimativeLike::Float,
+                                //                 is_default: _
+                                //             })
+                                //         )
+                                //     }
+                                //     TypeResp::CharLike => {
+                                //         let type_data = type_defs.get_until_root(type_name).ok_or(
+                                //             SymbolTableError::TypeError(
+                                //                 format!("Type `{}` not found", type_name).into(),
+                                //             ),
+                                //         )?;
+                                //
+                                //         matches!(
+                                //             type_data.type_info,
+                                //             TypeDefInfoType::TypeDefPrim(PrimativeType {
+                                //                 size: _,
+                                //                 like: PrimativeLike::Char,
+                                //                 is_default: _
+                                //             })
+                                //         )
+                                //     }
+                                //     TypeResp::BoolLike => {
+                                //         let type_data = type_defs.get_until_root(type_name).ok_or(
+                                //             SymbolTableError::TypeError(
+                                //                 format!("Type `{}` not found", type_name).into(),
+                                //             ),
+                                //         )?;
+                                //
+                                //         matches!(
+                                //             type_data.type_info,
+                                //             TypeDefInfoType::TypeDefPrim(PrimativeType {
+                                //                 size: _,
+                                //                 like: PrimativeLike::Bool,
+                                //                 is_default: _
+                                //             })
+                                //         )
+                                //     }
+                                // }
                             } =>
                         {
                             decls.insert(
@@ -178,7 +161,7 @@ impl Statment {
                 let r_type = expr.get_type(type_defs, decls, func_ret_type)?;
                 r_type
                     .are_types_eq(
-                        is_func.then_some(&func_ret_type).unwrap_or(&block_ret_type),
+                        is_func.then_some(func_ret_type).unwrap_or(&block_ret_type),
                         type_defs,
                     )
                     .then_some(())

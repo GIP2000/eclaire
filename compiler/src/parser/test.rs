@@ -1,4 +1,7 @@
-use crate::parser::grammer::expression::{TypeDef, TypeDefInfoType};
+use crate::parser::grammer::{
+    assignment::TypeRespConcrete,
+    expression::{TypeDef, TypeDefInfoType},
+};
 
 use super::*;
 
@@ -30,15 +33,19 @@ fn test_type_checking_wrong() {
 
         const foo = fn() {
             let x = 1;
+
+            let bar: i32 = &x;
+
             let x2: u32 = 32;
 
             let foo = x + x2;
-
 
         };
         ",
     )
     .expect("Should be vaild");
+
+    eprintln!("HERE I AM: table = {:?}", table);
 
     table.type_check().expect_err("invalid types");
 }
@@ -94,6 +101,16 @@ fn test_type_checking() {
 
             let s: structFoo;
 
+            let z: &u32 = &x2;
+
+            let zz: &&u32 = &z;
+
+            let zzz: &&&u32 = &zz;
+
+            let full: u32 = *z;
+            let full2: u32 = ***zzz;
+
+
         };
         ",
     )
@@ -119,6 +136,13 @@ fn test_typing() {
             let x2: u32 = 32;
             let f = 1.;
             let f2: f64 = 1.;
+
+            let y = &x;
+
+            let z: &i32 = y;
+
+            let zz: i32 = *z ;
+            let zzz: i32 = *y ;
 
         };
         ",
