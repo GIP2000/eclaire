@@ -1,5 +1,3 @@
-use clap::parser::IdsRef;
-
 use crate::{
     debug,
     lexer::LexToken,

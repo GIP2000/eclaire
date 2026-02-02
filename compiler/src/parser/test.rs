@@ -1,7 +1,4 @@
-use crate::parser::grammer::{
-    assignment::TypeRespConcrete,
-    expression::{TypeDef, TypeDefInfoType},
-};
+use crate::parser::grammer::expression::{TypeDef, TypeDefInfoType};
 
 use super::*;
 

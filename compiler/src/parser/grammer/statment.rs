@@ -1,21 +1,16 @@
-use std::any::Any;
-
 use lexer::LexerIterator;
 
 use crate::{
-    debug,
     lexer::{LexToken, MyLexerError},
     parser::{
         grammer::{
             assignment::{Assignment, AssignmentType},
-            expression::{Expression, TypeDefInfoType, TypeResp},
-            structures::{PrimativeLike, PrimativeType},
+            expression::{Expression, TypeResp},
         },
         symbol_table::{
-            CompareTypes, DeclNode, SymbolTableDecl, SymbolTableError, SymbolTablePair,
-            SymbolTableType, SymbolTableTypePair,
+            CompareTypes, DeclNode, SymbolTableDecl, SymbolTableError, SymbolTableType,
         },
-        Parse, ParseIntoWith, ParserInto, Result,
+        Parse, ParserInto, Result,
     },
     trace,
 };

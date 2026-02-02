@@ -141,7 +141,7 @@ impl Parse for TypeDef {
             .or_else(|_| {
                 token_stream.parse_with(symbol_table, |token_stream, symbol_table| {
                     let lst: Box<_> = token_stream
-                        .parse_with_many(symbol_table, |token_stream, symbol_table| {
+                        .parse_with_many(symbol_table, |token_stream, _symbol_table| {
                             token_stream.next_matches(LexToken::Ampersand)?;
                             Ok(token_stream.next_matches(LexToken::Mut).is_ok())
                         })
@@ -669,7 +669,7 @@ impl Expression {
             Expression::Constant(ConstantExpression::CharLit(_)) => Ok(TypeResp::CharLike),
             Expression::Constant(ConstantExpression::BoolLit(_)) => Ok(TypeResp::BoolLike),
             Expression::Constant(ConstantExpression::StrLit(_)) => {
-                unimplemented!("TODO: STRLIT (and pointers)")
+                Ok(TypeResp::Pointer(false, Box::new(TypeResp::CharLike)))
             }
             Expression::Constant(ConstantExpression::TypeLit(_)) => Err(
                 // TODO: comptime functions
