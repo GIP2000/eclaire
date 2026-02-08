@@ -8,7 +8,7 @@ use crate::{
             expression::{Expression, TypeResp},
         },
         symbol_table::{
-            CompareTypes, DeclNode, SymbolTableDecl, SymbolTableError, SymbolTableType,
+            CompareTypes, DeclNode, STTIdxPair, SymbolTableDecl, SymbolTableError, SymbolTableType,
         },
         Parse, ParserInto, Result,
     },
@@ -24,7 +24,7 @@ pub enum Statment {
 impl Statment {
     pub fn type_check(
         &self,
-        type_defs: (&SymbolTableType, usize),
+        type_defs: STTIdxPair<'_>,
         decls: &mut SymbolTableDecl,
         func_ret_type: &TypeResp,
         block_ret_type: &TypeResp,

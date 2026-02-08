@@ -6,7 +6,7 @@ use crate::{
             expression::TypeResp,
             ident::{Ident, IdentPair},
         },
-        symbol_table::{CompareTypes, SymbolTableType},
+        symbol_table::{CompareTypes, STTIdxPair, SymbolTableType},
         Parse, ParseIntoWith, ParserInto, Result,
     },
     utils::iterator::IterPlusError,
@@ -33,7 +33,7 @@ pub struct Struct {
 }
 
 impl<'a> CompareTypes<'a, Struct> for Struct {
-    fn are_types_eq(&'a self, other: &'a Self, type_defs: (&SymbolTableType, usize)) -> bool {
+    fn are_types_eq(&'a self, other: &'a Self, type_defs: STTIdxPair<'_>) -> bool {
         self.fields
             .iter()
             .zip(other.fields.iter())
@@ -63,7 +63,7 @@ pub struct Enum {
 }
 
 impl<'a> CompareTypes<'a, Enum> for Enum {
-    fn are_types_eq(&'a self, other: &'a Self, type_defs: (&SymbolTableType, usize)) -> bool {
+    fn are_types_eq(&'a self, other: &'a Self, type_defs: STTIdxPair<'_>) -> bool {
         self.variants.iter().zip(other.variants.iter()).all(
             |((ident_a, variant_type_a), (ident_b, variant_type_b))| {
                 if ident_a != ident_b {

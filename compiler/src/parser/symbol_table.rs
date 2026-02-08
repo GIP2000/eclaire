@@ -36,11 +36,13 @@ pub struct SymbolTable<V> {
     pub default_char: Option<Ident>,
 }
 
+pub type SymbolTableIdxPair<'a, T> = (&'a SymbolTable<T>, usize);
+
 pub trait SymbolTablePair<Ret> {
     fn get(&self, ident: &Ident) -> Option<&Ret>;
 }
 
-impl<V: Clone + Debug> SymbolTablePair<V> for (&SymbolTable<V>, usize) {
+impl<V: Clone + Debug> SymbolTablePair<V> for SymbolTableIdxPair<'_, V> {
     fn get(&self, ident: &Ident) -> Option<&V> {
         self.0.get_as(ident, self.1)
     }
@@ -50,7 +52,7 @@ pub trait SymbolTableTypePair {
     fn get_until_root(&self, ident: &Ident) -> Option<&TypeDef>;
 }
 
-impl SymbolTableTypePair for (&SymbolTableType, usize) {
+impl SymbolTableTypePair for STTIdxPair<'_> {
     fn get_until_root(&self, ident: &Ident) -> Option<&TypeDef> {
         self.0.get_as_until_root(ident, self.1)
     }
@@ -74,6 +76,7 @@ impl DeclNode {
 }
 
 pub type SymbolTableType = SymbolTable<TypeDef>;
+pub type STTIdxPair<'a> = SymbolTableIdxPair<'a, TypeDef>;
 pub type SymbolTableDecl = SymbolTable<DeclNode>;
 
 impl<V> Default for SymbolTable<V> {
@@ -168,7 +171,7 @@ impl SymbolTableType {
 }
 
 pub trait CompareTypes<'a, Rhs> {
-    fn are_types_eq(&'a self, other: &'a Rhs, type_defs: (&SymbolTableType, usize)) -> bool;
+    fn are_types_eq(&'a self, other: &'a Rhs, type_defs: STTIdxPair<'_>) -> bool;
 }
 
 impl<V> SymbolTable<V>

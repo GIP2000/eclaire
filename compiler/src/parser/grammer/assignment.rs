@@ -7,7 +7,7 @@ use crate::{
             ident::Ident,
             structures::PrimativeLike,
         },
-        symbol_table::{CompareTypes, SymbolTableType, SymbolTableTypePair},
+        symbol_table::{CompareTypes, STTIdxPair, SymbolTableType, SymbolTableTypePair},
         Parse, ParseIntoWith, ParserError, ParserInto, Result,
     },
     trace,
@@ -61,11 +61,7 @@ impl From<Ident> for TypeRespConcrete {
     }
 }
 impl<'a> CompareTypes<'a, TypeRespConcrete> for TypeRespConcrete {
-    fn are_types_eq(
-        &'a self,
-        other: &'a TypeRespConcrete,
-        type_defs: (&SymbolTableType, usize),
-    ) -> bool {
+    fn are_types_eq(&'a self, other: &'a TypeRespConcrete, type_defs: STTIdxPair<'_>) -> bool {
         match (self, other) {
             // small clone optimization to not have to clone a million objects if its a pointer
             // first

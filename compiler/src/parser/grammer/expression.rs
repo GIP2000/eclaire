@@ -11,8 +11,8 @@ use crate::{
         },
         safe_parse_wrapper,
         symbol_table::{
-            CompareTypes, SymbolTableDecl, SymbolTableError, SymbolTablePair, SymbolTableType,
-            SymbolTableTypePair,
+            CompareTypes, STTIdxPair, SymbolTableDecl, SymbolTableError, SymbolTablePair,
+            SymbolTableType, SymbolTableTypePair,
         },
         Parse, ParseIntoWith, ParserError, ParserInto, Result,
     },
@@ -38,7 +38,7 @@ pub struct TypeDef {
 }
 
 impl<'a> CompareTypes<'a, Option<&'a TypeDef>> for Option<&'a TypeDef> {
-    fn are_types_eq(&'a self, other: &'a Self, type_defs: (&SymbolTableType, usize)) -> bool {
+    fn are_types_eq(&'a self, other: &'a Self, type_defs: STTIdxPair<'_>) -> bool {
         match (self, other) {
             (Some(a), Some(b)) => a.are_types_eq(*b, type_defs),
             _ => false,
@@ -47,17 +47,13 @@ impl<'a> CompareTypes<'a, Option<&'a TypeDef>> for Option<&'a TypeDef> {
 }
 
 impl<'a> CompareTypes<'a, TypeDef> for TypeRespConcrete {
-    fn are_types_eq(&'a self, other: &'a TypeDef, type_defs: (&SymbolTableType, usize)) -> bool {
+    fn are_types_eq(&'a self, other: &'a TypeDef, type_defs: STTIdxPair<'_>) -> bool {
         other.are_types_eq(self, type_defs)
     }
 }
 
 impl<'a> CompareTypes<'a, TypeRespConcrete> for TypeDef {
-    fn are_types_eq(
-        &'a self,
-        other: &'a TypeRespConcrete,
-        type_defs: (&SymbolTableType, usize),
-    ) -> bool {
+    fn are_types_eq(&'a self, other: &'a TypeRespConcrete, type_defs: STTIdxPair<'_>) -> bool {
         match (other, &self.type_info) {
             (TypeRespConcrete::IdentRef(ident), _) => type_defs
                 .get_until_root(ident)
@@ -70,7 +66,7 @@ impl<'a> CompareTypes<'a, TypeRespConcrete> for TypeDef {
 }
 
 impl<'a> CompareTypes<'a, TypeDef> for TypeDef {
-    fn are_types_eq(&'a self, other: &'a Self, type_defs: (&SymbolTableType, usize)) -> bool {
+    fn are_types_eq(&'a self, other: &'a Self, type_defs: STTIdxPair<'_>) -> bool {
         if self.size_bits != other.size_bits {
             return false;
         }
@@ -199,7 +195,7 @@ pub struct BlockExpression(Vec<Statment>, usize);
 impl BlockExpression {
     pub fn get_type(
         &self,
-        type_defs: (&SymbolTableType, usize),
+        type_defs: STTIdxPair<'_>,
         decls: &mut SymbolTableDecl,
         func_ret_type: &TypeResp,
     ) -> std::result::Result<TypeResp, SymbolTableError> {
@@ -439,7 +435,7 @@ impl TypeResp {
         }
     }
 
-    pub fn is_int(&self, type_defs: (&SymbolTableType, usize)) -> bool {
+    pub fn is_int(&self, type_defs: STTIdxPair<'_>) -> bool {
         is_type_resp!(
             self,
             type_defs,
@@ -448,38 +444,34 @@ impl TypeResp {
         )
     }
 
-    pub fn is_float(&self, type_defs: (&SymbolTableType, usize)) -> bool {
+    pub fn is_float(&self, type_defs: STTIdxPair<'_>) -> bool {
         is_type_resp!(self, type_defs, PrimativeLike::Float, TypeResp::FloatLike)
     }
 
-    pub fn is_uint(&self, type_defs: (&SymbolTableType, usize)) -> bool {
+    pub fn is_uint(&self, type_defs: STTIdxPair<'_>) -> bool {
         is_type_resp!(self, type_defs, PrimativeLike::UInt, TypeResp::IntLike)
     }
 
-    pub fn is_bool(&self, type_defs: (&SymbolTableType, usize)) -> bool {
+    pub fn is_bool(&self, type_defs: STTIdxPair<'_>) -> bool {
         is_type_resp!(self, type_defs, PrimativeLike::Bool, TypeResp::BoolLike)
     }
 }
 
 impl<'a> CompareTypes<'a, TypeRespConcrete> for TypeResp {
     #[inline(always)]
-    fn are_types_eq(
-        &'a self,
-        other: &'a TypeRespConcrete,
-        type_defs: (&SymbolTableType, usize),
-    ) -> bool {
+    fn are_types_eq(&'a self, other: &'a TypeRespConcrete, type_defs: STTIdxPair<'_>) -> bool {
         other.are_types_eq(self, type_defs)
     }
 }
 
 impl<'a> CompareTypes<'a, TypeResp> for TypeRespConcrete {
-    fn are_types_eq(&'a self, other: &'a TypeResp, type_defs: (&SymbolTableType, usize)) -> bool {
+    fn are_types_eq(&'a self, other: &'a TypeResp, type_defs: STTIdxPair<'_>) -> bool {
         TypeResp::from(self.clone()).are_types_eq(other, type_defs)
     }
 }
 
 impl<'a> CompareTypes<'a, TypeResp> for TypeResp {
-    fn are_types_eq(&'a self, other: &'a Self, type_defs: (&SymbolTableType, usize)) -> bool {
+    fn are_types_eq(&'a self, other: &'a Self, type_defs: STTIdxPair<'_>) -> bool {
         use TypeDefInfoType::*;
         match (self, other) {
             (TypeResp::Void, TypeResp::Void)
@@ -534,7 +526,7 @@ impl From<Ident> for TypeResp {
 impl Expression {
     pub fn get_type(
         &self,
-        type_defs: (&SymbolTableType, usize),
+        type_defs: STTIdxPair<'_>,
         decls: &mut SymbolTableDecl,
         func_ret_type: &TypeResp,
     ) -> std::result::Result<TypeResp, SymbolTableError> {
