@@ -157,7 +157,7 @@ impl SymbolTableType {
                 .as_ref()
                 .cloned()
                 .map(|name| name.into())
-                .unwrap_or(TypeResp::Void);
+                .unwrap_or(TypeResp::Concrete(TypeRespConcrete::Void));
 
             for statment in f.statments.iter() {
                 statment.type_check((self, idx), decls, &f_ret_name, &f_ret_name)?;

@@ -1,5 +1,4 @@
 use crate::{
-    debug,
     lexer::LexToken,
     parser::{
         grammer::{
@@ -46,7 +45,7 @@ impl Parse for AssignmentType {
 pub enum TypeRespConcrete {
     IdentRef(Ident),
     Void,
-    Pointer(bool, Box<Self>),
+    Pointer(bool, Box<TypeResp>),
 }
 
 impl<A: AsRef<str>> PartialEq<A> for TypeRespConcrete {
@@ -63,14 +62,24 @@ impl From<Ident> for TypeRespConcrete {
 impl<'a> CompareTypes<'a, TypeRespConcrete> for TypeRespConcrete {
     fn are_types_eq(&'a self, other: &'a TypeRespConcrete, type_defs: STTIdxPair<'_>) -> bool {
         match (self, other) {
-            // small clone optimization to not have to clone a million objects if its a pointer
-            // first
             (
                 TypeRespConcrete::Pointer(is_mut1, type_resp1),
                 TypeRespConcrete::Pointer(is_mut2, type_resp2),
             ) => is_mut1 == is_mut2 && type_resp1.are_types_eq(type_resp2.as_ref(), type_defs),
-            (TypeRespConcrete::Pointer(_, _), _) => false,
-            (a, b) => TypeResp::from(a.clone()).are_types_eq(&TypeResp::from(b.clone()), type_defs),
+            (TypeRespConcrete::Void, TypeRespConcrete::Void) => true,
+            (TypeRespConcrete::IdentRef(a), TypeRespConcrete::IdentRef(b)) => {
+                let a = type_defs.get_until_root(a);
+                let b = type_defs.get_until_root(b);
+
+                match (a, b) {
+                    (Some(a), Some(b)) => a.are_types_eq(b, type_defs),
+                    _ => false,
+                }
+            }
+            (TypeRespConcrete::IdentRef(_), _)
+            | (_, TypeRespConcrete::IdentRef(_))
+            | (TypeRespConcrete::Void, _)
+            | (_, TypeRespConcrete::Void) => false,
         }
     }
 }
@@ -93,13 +102,19 @@ impl Parse for TypeRespConcrete {
             LexToken::AmpersandAmpersand => {
                 let is_mut = token_stream.next_matches(LexToken::Mut).is_ok();
                 let next_parse = token_stream.parse(symbol_table).map_err(|err| err)?;
-                Self::Pointer(false, Box::new(Self::Pointer(is_mut, Box::new(next_parse))))
+                Self::Pointer(
+                    false,
+                    Box::new(TypeResp::Concrete(Self::Pointer(
+                        is_mut,
+                        Box::new(TypeResp::Concrete(next_parse)),
+                    ))),
+                )
             }
 
             LexToken::Ampersand => {
                 let is_mut = token_stream.next_matches(LexToken::Mut).is_ok();
                 let next_parse = token_stream.parse(symbol_table)?;
-                Self::Pointer(is_mut, Box::new(next_parse))
+                Self::Pointer(is_mut, Box::new(TypeResp::Concrete(next_parse)))
             }
             _ => unreachable!(),
         })

@@ -142,7 +142,9 @@ impl Parse for TypeDef {
 
                     let type_info = lst.into_iter().fold(
                         TypeRespConcrete::IdentRef(token_stream.parse(symbol_table)?),
-                        |acc, val| TypeRespConcrete::Pointer(val, Box::new(acc)),
+                        |acc, val| {
+                            TypeRespConcrete::Pointer(val, Box::new(TypeResp::Concrete(acc)))
+                        },
                     );
 
                     Ok(Self {
@@ -207,7 +209,7 @@ impl BlockExpression {
         let type_defs = (type_defs.0, *sidx);
 
         let mut found = false;
-        let mut first = TypeResp::Void;
+        let mut first = TypeRespConcrete::Void.into();
         for s in statments.iter() {
             if let (Statment::Return(false, expr), false) = (s, found) {
                 first = expr.get_type(type_defs, decls, func_ret_type)?;
@@ -333,33 +335,25 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum TypeResp {
-    IdentRef(Ident),
-    Void,
+    Concrete(TypeRespConcrete),
     IntLike,
     FloatLike,
     CharLike,
     BoolLike,
-    Pointer(bool, Box<TypeResp>),
 }
 
 impl From<TypeRespConcrete> for TypeResp {
     fn from(value: TypeRespConcrete) -> Self {
-        match value {
-            TypeRespConcrete::IdentRef(ident) => Self::IdentRef(ident),
-            TypeRespConcrete::Void => Self::Void,
-            TypeRespConcrete::Pointer(is_mut, resp) => {
-                Self::Pointer(is_mut, Box::new((*resp).into()))
-            }
-        }
+        Self::Concrete(value)
     }
 }
 
 macro_rules! is_type_resp {
     ($resp: ident, $table: ident, $prim_like: pat, $type_resp_like: pat) => {
         match $resp {
-            TypeResp::IdentRef(ident) => {
+            TypeResp::Concrete(TypeRespConcrete::IdentRef(ident)) => {
                 let r_type = $table.get_until_root(ident);
 
                 match r_type {
@@ -387,8 +381,7 @@ impl TypeResp {
         type_defs: &SymbolTableType,
     ) -> std::result::Result<TypeRespConcrete, SymbolTableError> {
         match self {
-            TypeResp::IdentRef(ident) => Ok(TypeRespConcrete::IdentRef(ident.clone())),
-            TypeResp::Void => Ok(TypeRespConcrete::Void),
+            TypeResp::Concrete(x) => Ok(x.clone()),
             TypeResp::IntLike => type_defs
                 .default_int
                 .as_ref()
@@ -413,23 +406,18 @@ impl TypeResp {
                 .cloned()
                 .map(|x| TypeRespConcrete::IdentRef(x))
                 .ok_or(SymbolTableError::TypeError("type must be known".into())),
-            TypeResp::Pointer(is_mut, type_resp) => Ok(TypeRespConcrete::Pointer(
-                *is_mut,
-                Box::new((*type_resp).into_concrete(type_defs)?),
-            )),
         }
     }
 
     pub fn into_pointer(self, mutable: bool) -> Self {
-        Self::Pointer(mutable, Box::new(self))
+        Self::Concrete(TypeRespConcrete::Pointer(mutable, Box::new(self)))
     }
 
     pub fn get_root_type(&self) -> &Self {
         let mut val = self;
         loop {
             match val {
-                // tail recursion is dumb and stupid
-                TypeResp::Pointer(_, x) => val = x.as_ref(),
+                TypeResp::Concrete(TypeRespConcrete::Pointer(_, x)) => val = x.as_ref(),
                 x => return x,
             }
         }
@@ -474,20 +462,19 @@ impl<'a> CompareTypes<'a, TypeResp> for TypeResp {
     fn are_types_eq(&'a self, other: &'a Self, type_defs: STTIdxPair<'_>) -> bool {
         use TypeDefInfoType::*;
         match (self, other) {
-            (TypeResp::Void, TypeResp::Void)
-            | (TypeResp::IntLike, TypeResp::IntLike)
+            (TypeResp::Concrete(x), TypeResp::Concrete(y)) => x.are_types_eq(y, type_defs),
+            (TypeResp::IntLike, TypeResp::IntLike)
             | (TypeResp::FloatLike, TypeResp::FloatLike)
             | (TypeResp::CharLike, TypeResp::CharLike)
             | (TypeResp::BoolLike, TypeResp::BoolLike) => true,
-            (TypeResp::IdentRef(a), TypeResp::IdentRef(b)) => {
-                match (type_defs.get_until_root(a), type_defs.get_until_root(b)) {
-                    (Some(a), Some(b)) => a.are_types_eq(b, type_defs),
-                    _ => false,
-                }
-            }
-
+            // (TypeResp::IdentRef(a), TypeResp::IdentRef(b)) => {
+            //     match (type_defs.get_until_root(a), type_defs.get_until_root(b)) {
+            //         (Some(a), Some(b)) => a.are_types_eq(b, type_defs),
+            //         _ => false,
+            //     }
+            // }
             (
-                TypeResp::IdentRef(ident),
+                TypeResp::Concrete(TypeRespConcrete::IdentRef(ident)),
                 l @ TypeResp::IntLike
                 | l @ TypeResp::FloatLike
                 | l @ TypeResp::BoolLike
@@ -498,7 +485,7 @@ impl<'a> CompareTypes<'a, TypeResp> for TypeResp {
                 | l @ TypeResp::FloatLike
                 | l @ TypeResp::BoolLike
                 | l @ TypeResp::CharLike,
-                TypeResp::IdentRef(ident),
+                TypeResp::Concrete(TypeRespConcrete::IdentRef(ident)),
             ) => {
                 let datatype = type_defs.get_until_root(ident);
 
@@ -507,11 +494,6 @@ impl<'a> CompareTypes<'a, TypeResp> for TypeResp {
                     _ => false,
                 }
             }
-            (TypeResp::Pointer(true, first), TypeResp::Pointer(true, second))
-            | (TypeResp::Pointer(false, first), TypeResp::Pointer(false, second)) => {
-                first.are_types_eq(second.as_ref(), type_defs)
-            }
-
             _ => false,
         }
     }
@@ -519,7 +501,7 @@ impl<'a> CompareTypes<'a, TypeResp> for TypeResp {
 
 impl From<Ident> for TypeResp {
     fn from(value: Ident) -> Self {
-        Self::IdentRef(value)
+        Self::Concrete(value.into())
     }
 }
 
@@ -535,7 +517,7 @@ impl Expression {
                 match op {
                     BinaryOperator::Call => {
                         let f = match a.get_type(type_defs, decls, func_ret_type)? {
-                            TypeResp::IdentRef(ident) => ident,
+                            TypeResp::Concrete(TypeRespConcrete::IdentRef(ident)) => ident,
                             _ => {
                                 return Err(SymbolTableError::TypeError(
                                     "Only Ident's are valid for function calls".into(),
@@ -559,7 +541,7 @@ impl Expression {
                                         return if args
                                             .iter()
                                             .map(|arg| match arg.get_type(type_defs, decls, func_ret_type)? {
-                                                TypeResp::Void => Err(SymbolTableError::TypeError("".into())),
+                                                TypeResp::Concrete(TypeRespConcrete::Void) => Err(SymbolTableError::TypeError("Invalid void argument".into())),
                                                 x => Ok(x),
                                             })
                                             .zip(f.args.iter().map(|x| &x.datatype))
@@ -620,14 +602,16 @@ impl Expression {
                 // if type_def == b.get_type(type_defs, decls)? {
                 if type_def.are_types_eq(&b.get_type(type_defs, decls, func_ret_type)?, type_defs) {
                     if op.is_assignment() {
-                        Ok(TypeResp::Void)
+                        Ok(TypeResp::Concrete(TypeRespConcrete::Void))
                     } else if op.is_comparison() {
                         type_defs
                             .0
                             .default_bool
                             .as_ref()
                             .cloned()
-                            .map(|bool_type| TypeResp::IdentRef(bool_type))
+                            .map(|bool_type| {
+                                TypeResp::Concrete(TypeRespConcrete::IdentRef(bool_type))
+                            })
                             .ok_or(SymbolTableError::TypeError("No boolean type set".into()))
                     } else {
                         Ok(type_def)
@@ -647,12 +631,12 @@ impl Expression {
             Expression::UnaryOp(UnaryOperator::FromPointer, expr) => expr
                 .get_type(type_defs, decls, func_ret_type)
                 .and_then(|x| match x {
-                    TypeResp::Pointer(_, type_resp) => Ok(*type_resp),
+                    TypeResp::Concrete(TypeRespConcrete::Pointer(_, type_resp)) => Ok(*type_resp),
                     _ => Err(SymbolTableError::TypeError("type must be a pointer".into())),
                 }),
             Expression::UnaryOp(UnaryOperator::IntoPointer, expr) => expr
                 .get_type(type_defs, decls, func_ret_type)
-                .map(|x| TypeResp::Pointer(false, Box::new(x))), // TODO: handle `& mut` vs `&`
+                .map(|x| TypeResp::Concrete(TypeRespConcrete::Pointer(false, Box::new(x)))), // TODO: handle `& mut` vs `&`
             Expression::UnaryOp(_, expr) => expr.get_type(type_defs, decls, func_ret_type),
             Expression::List(_) => Err(SymbolTableError::TypeError(
                 "Can't have a naked list".into(),
@@ -666,9 +650,9 @@ impl Expression {
             Expression::Constant(ConstantExpression::FloatLit(_)) => Ok(TypeResp::FloatLike),
             Expression::Constant(ConstantExpression::CharLit(_)) => Ok(TypeResp::CharLike),
             Expression::Constant(ConstantExpression::BoolLit(_)) => Ok(TypeResp::BoolLike),
-            Expression::Constant(ConstantExpression::StrLit(_)) => {
-                Ok(TypeResp::Pointer(false, Box::new(TypeResp::CharLike)))
-            }
+            Expression::Constant(ConstantExpression::StrLit(_)) => Ok(TypeResp::Concrete(
+                TypeRespConcrete::Pointer(false, Box::new(TypeResp::CharLike)),
+            )),
             Expression::Constant(ConstantExpression::TypeLit(_)) => Err(
                 // TODO: comptime functions
                 SymbolTableError::TypeError("Types must be removed at previous stage".into()),
@@ -718,8 +702,8 @@ impl Expression {
                 let r_type = block_expression.get_type(type_defs, decls, func_ret_type)?;
 
                 r_type
-                    .are_types_eq(&TypeResp::Void, type_defs)
-                    .then_some(TypeResp::Void)
+                    .are_types_eq(&TypeResp::Concrete(TypeRespConcrete::Void), type_defs)
+                    .then_some(TypeResp::Concrete(TypeRespConcrete::Void))
                     .ok_or(SymbolTableError::TypeError(
                         "While loop block expression types must be void for now".into(),
                     ))
