@@ -1,116 +1,80 @@
-use lexer::LexerIterator;
-
 use crate::{
-    lexer::{LexToken, MyLexerError},
+    lexer::{LexToken, MyLexer},
     parser::{
-        grammer::{
-            assignment::{Assignment, AssignmentType},
-            expression::{Expression, TypeResp},
-        },
-        symbol_table::{
-            CompareTypes, DeclNode, STTIdxPair, SymbolTableDecl, SymbolTableError, SymbolTableType,
-        },
-        Parse, ParserInto, Result,
+        Parser,
+        grammer::{expression::Expression, function::Function, ident::Ident, types::Type},
     },
-    trace,
 };
 
-#[derive(Debug, Clone)]
-pub enum Statment {
-    Assignment(Assignment),
-    Expression(Expression),
-    Return(bool, Expression),
+pub enum IdentCreationType {
+    Const,
+    Let(bool),
 }
-impl Statment {
-    pub fn type_check(
-        &self,
-        type_defs: STTIdxPair<'_>,
-        decls: &mut SymbolTableDecl,
-        func_ret_type: &TypeResp,
-        block_ret_type: &TypeResp,
-    ) -> std::result::Result<(), SymbolTableError> {
-        Ok(match self {
-            Statment::Assignment(assignment) => match assignment.assignment_type {
-                AssignmentType::Let(is_mut) => {
-                    match (assignment.expr.as_ref(), assignment.data_type.as_ref()) {
-                        (Some(assignment_expr), None) => {
-                            let typeresp =
-                                assignment_expr.get_type(type_defs, decls, func_ret_type)?;
 
-                            decls.insert_from_resp(
-                                assignment.ident.clone(),
-                                typeresp,
-                                is_mut,
-                                type_defs.0,
-                            )?;
-                        }
-                        (None, Some(type_name)) => {
-                            decls.insert(
-                                assignment.ident.clone(),
-                                DeclNode::new(type_name.clone(), is_mut),
-                            )?;
-                        }
-                        (Some(assignment_expr), Some(type_name))
-                            if assignment_expr
-                                .get_type(type_defs, decls, func_ret_type)?
-                                .are_types_eq(type_name, type_defs) =>
-                        {
-                            decls.insert(
-                                assignment.ident.clone(),
-                                DeclNode::new(type_name.clone(), is_mut),
-                            )?;
-                        }
-                        // TODO: put a better error
-                        (Some(_), Some(_)) | (None, None) => {
-                            return Err(SymbolTableError::TypeError(
-                                "Not enough info to make an inference".into(),
-                            ));
-                        }
-                    }
-                }
-                AssignmentType::Const => {}
-            },
-            Statment::Expression(expr) => {
-                expr.get_type(type_defs, decls, func_ret_type)?;
+impl<'a> Parser<'a> for IdentCreationType {
+    type Error = super::Error;
+
+    fn from_lexer<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        let mut val = lexer.next_matches_func(|&x| match x {
+            LexToken::Const => Some(IdentCreationType::Const),
+            LexToken::Let => Some(IdentCreationType::Let(false)),
+            _ => None,
+        })?;
+
+        if let IdentCreationType::Let(x) = &mut val {
+            if let Ok(_) = lexer.next_matches(LexToken::Mut) {
+                *x = true;
             }
-            Statment::Return(is_func, expr) => {
-                let r_type = expr.get_type(type_defs, decls, func_ret_type)?;
-                r_type
-                    .are_types_eq(
-                        is_func.then_some(func_ret_type).unwrap_or(&block_ret_type),
-                        type_defs,
-                    )
-                    .then_some(())
-                    .ok_or(SymbolTableError::TypeError(
-                        "Type Mismatch: return doesn't expected type".into(),
-                    ))?;
-            }
-        })
+        };
+        Ok(val)
     }
 }
 
-impl Parse for Statment {
-    fn from_lexer<'a>(
-        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        symbol_table: &mut SymbolTableType,
-    ) -> Result<Self> {
-        trace!("Entering Statment");
+pub enum LValue<'a> {
+    Expression(super::expression::Expression<'a>),
+    Function(super::function::Function<'a>),
+}
 
-        token_stream
-            .parse(symbol_table)
-            .map(|x| Self::Assignment(x))
-            .or_else(|_| {
-                token_stream.parse(symbol_table).map(|x| {
-                    match token_stream.next_matches(LexToken::SemiColon) {
-                        Ok(_) => Self::Expression(x),
-                        Err(_) => Self::Return(false, x),
-                    }
-                })
-            })
-            .or_else(|_| {
-                token_stream.next_matches(LexToken::Return)?;
-                let expr: Expression = token_stream.parse(symbol_table)?;
-                Ok(Self::Return(true, expr))
-            })
+impl<'a> Parser<'a> for LValue<'a> {
+    type Error = super::Error;
+
+    fn from_lexer<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        Expression::parse(lexer)
+            .map(LValue::Expression)
+            .or_else(|_| Function::parse(lexer).map(LValue::Function))
+    }
+}
+
+pub enum Statment<'a> {
+    IdentCreation(IdentCreationType, Ident<'a>, Option<Type<'a>>, LValue<'a>),
+    Expression(super::expression::Expression<'a>),
+}
+
+impl<'a> Parser<'a> for Statment<'a> {
+    type Error = super::Error;
+
+    fn from_lexer<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        let ic_type = IdentCreationType::parse(lexer)?;
+        let ident = Ident::parse(lexer)?;
+
+        let type_val = lexer
+            .next_matches(LexToken::Colon)
+            .ok()
+            .map(|_| Type::parse(lexer))
+            .transpose()?;
+
+        _ = lexer.next_matches(LexToken::Eq)?;
+
+        let lvalue = LValue::parse(lexer)?;
+
+        match (ic_type, lvalue) {
+            (ic_type @ IdentCreationType::Let(_), lvalue @ LValue::Expression(_))
+            | (ic_type @ IdentCreationType::Const, lvalue) => {
+                Ok(Self::IdentCreation(ic_type, ident, type_val, lvalue))
+            }
+            _ => Err(anyhow::anyhow!(
+                "Error Let value must have a non-const lvalue"
+            )),
+        }
     }
 }

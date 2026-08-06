@@ -1,209 +1,107 @@
-#[cfg(test)]
-mod test;
-
-mod grammer;
+pub mod grammer;
 pub mod symbol_table;
 
 use std::marker::PhantomData;
 
-use grammer::TranslationUnit;
-use lexer::{ErrorMeta, LexerIterator, LexerIteratorError};
+use crate::lexer::MyLexer;
 
-use crate::{
-    lexer::{LexToken, MyLexerError},
-    parser::symbol_table::SymbolTableType,
-    trace,
-};
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum ParserError<E> {
-    #[error(transparent)]
-    LexerError(#[from] LexerIteratorError<E>),
-    #[error("Failed to find parsing target, not match found: {0}")]
-    DoesNotMatch(ErrorMeta),
-    #[error("Other Error")]
-    Other,
-}
-
-pub type Result<T> = std::result::Result<T, ParserError<MyLexerError>>;
-
-#[inline]
-pub fn safe_parse_wrapper<'a, I, O, F>(
-    token_stream: &mut I,
-    symbol_table: &mut SymbolTableType,
-    parser: &mut F,
-) -> Result<O>
+pub struct ParserIter<'a, 'b, L, V, S>
 where
-    I: LexerIterator<'a, LexToken<'a>, MyLexerError>,
-    F: FnMut(&mut I, &mut SymbolTableType) -> Result<O>,
+    L: MyLexer<'a>,
+    S: ParserWithState<'a, L, V>,
 {
-    if let None | Some(Err(LexerIteratorError::NoMoreTokens)) = token_stream.clone().next() {
-        return Err(LexerIteratorError::NoMoreTokens.into());
-    };
-
-    let mut copy = token_stream.clone();
-
-    let result = parser(&mut copy, symbol_table).map_err(|err| match err {
-        ParserError::LexerError(lexer::LexerIteratorError::NoMoreTokens) => {
-            // TODO: make this better with an actual lineno and colno
-            ParserError::DoesNotMatch(ErrorMeta {
-                lineno: 0,
-                colno: 0,
-                display: "Unexpected EOF".into(),
-            })
-        }
-        err => err,
-    })?;
-
-    *token_stream = copy;
-    Ok(result)
+    lexer: &'b mut L,
+    state: S,
+    last_err: bool,
+    phantom_data: PhantomData<&'a V>,
 }
 
-trait Parse
+impl<'a, 'b, L, V, S> Iterator for ParserIter<'a, 'b, L, V, S>
+where
+    L: MyLexer<'a>,
+    S: ParserWithState<'a, L, V>,
+{
+    type Item = Result<V, S::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.last_err {
+            return None;
+        }
+
+        let val = self.state.parse(&mut self.lexer);
+
+        if let Err(_) = val {
+            self.last_err = true;
+        }
+
+        Some(val)
+    }
+}
+
+fn parse_wrapper<'a, L, V, E, F>(lexer: &mut L, mut f: F) -> Result<V, E>
+where
+    L: MyLexer<'a>,
+    F: FnMut(&mut L) -> Result<V, E>,
+{
+    let mut obj = lexer.clone();
+    let res = f(&mut obj)?;
+    *lexer = obj;
+    Ok(res)
+}
+
+pub trait Parser<'a>
 where
     Self: Sized,
 {
-    fn from_lexer<'a>(
-        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        symbol_table: &mut SymbolTableType,
-    ) -> Result<Self>;
+    type Error;
 
-    fn from_lexer_safe<'a>(
-        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        symbol_table: &mut SymbolTableType,
-    ) -> Result<Self> {
-        let result = safe_parse_wrapper(token_stream, symbol_table, &mut Self::from_lexer);
-
-        if let Err(err) = &result {
-            trace!("Error @ {err:?}");
-        }
-
-        result
-    }
-
-    fn from_lexer_many<'a, 'b, I: LexerIterator<'a, LexToken<'a>, MyLexerError>>(
-        token_stream: &'b mut I,
-        symbol_table: &'b mut SymbolTableType,
-    ) -> ParseIterWith<
-        'a,
-        'b,
-        I,
-        Self,
-        fn(token_stream: &mut I, symbol_table: &mut SymbolTableType) -> Result<Self>,
-    > {
-        ParseIterWith {
-            iter: token_stream,
-            func: Self::from_lexer_safe,
-            symbol_table,
-            phaton_data: PhantomData,
+    fn parse_many<'b, L: MyLexer<'a>>(
+        lexer: &'b mut L,
+    ) -> ParserIter<'a, 'b, L, Self, impl ParserWithState<'a, L, Self>> {
+        ParserIter {
+            lexer,
+            state: Self::from_lexer,
+            last_err: false,
+            phantom_data: PhantomData,
         }
     }
+
+    fn parse(lexer: &mut impl MyLexer<'a>) -> Result<Self, Self::Error> {
+        parse_wrapper(lexer, Self::from_lexer)
+    }
+
+    fn from_lexer<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error>;
 }
 
-trait ParserInto<'a, Output: Parse>
-where
-    Self: LexerIterator<'a, LexToken<'a>, MyLexerError>,
-{
-    fn parse(&mut self, symbol_table: &mut SymbolTableType) -> Result<Output> {
-        Output::from_lexer_safe(self, symbol_table)
-    }
-
+pub trait ParserWithState<'a, L: MyLexer<'a>, Val> {
+    type Error;
     fn parse_many<'b>(
-        &'b mut self,
-        symbol_table: &'b mut SymbolTableType,
-    ) -> ParseIterWith<
-        'a,
-        'b,
-        Self,
-        Output,
-        fn(token_stream: &mut Self, symbol_table: &mut SymbolTableType) -> Result<Output>,
-    > {
-        Output::from_lexer_many(self, symbol_table)
-    }
-}
-
-impl<'a, Output: Parse, I: LexerIterator<'a, LexToken<'a>, MyLexerError>> ParserInto<'a, Output>
-    for I
-{
-}
-
-impl<T: for<'c> TryFrom<&'c LexToken<'c>>> Parse for T {
-    fn from_lexer<'a>(
-        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        _: &mut SymbolTableType,
-    ) -> Result<Self> {
-        token_stream
-            .next_matches_func(|x| T::try_from(x).ok())
-            .map_err(|err| err.into())
-    }
-}
-
-struct ParseIterWith<
-    'a,
-    'b,
-    I: LexerIterator<'a, LexToken<'a>, MyLexerError>,
-    O,
-    F: FnMut(&mut I, &mut SymbolTableType) -> Result<O>,
-> {
-    iter: &'b mut I,
-    func: F,
-    symbol_table: &'b mut SymbolTableType,
-    phaton_data: PhantomData<&'a O>,
-}
-
-impl<
-        'a,
-        'b,
-        I: LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        O,
-        F: FnMut(&mut I, &mut SymbolTableType) -> Result<O>,
-    > Iterator for ParseIterWith<'a, 'b, I, O, F>
-{
-    type Item = Result<O>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match safe_parse_wrapper(self.iter, self.symbol_table, &mut self.func) {
-            Err(ParserError::LexerError(LexerIteratorError::NoMoreTokens)) => None,
-            x @ Ok(_) | x @ Err(_) => Some(x),
-        }
-    }
-}
-
-trait ParseIntoWith<'a>
-where
-    Self: LexerIterator<'a, LexToken<'a>, MyLexerError>,
-{
-    fn parse_with<Output>(
         &mut self,
-        symbol_table: &mut SymbolTableType,
-        mut parser: impl FnMut(&mut Self, &mut SymbolTableType) -> Result<Output>,
-    ) -> Result<Output> {
-        safe_parse_wrapper(self, symbol_table, &mut parser)
-    }
-
-    fn parse_with_many<'b, Output, F: FnMut(&mut Self, &mut SymbolTableType) -> Result<Output>>(
-        &'b mut self,
-        symbol_table: &'b mut SymbolTableType,
-        parser: F,
-    ) -> ParseIterWith<'a, 'b, Self, Output, F> {
-        ParseIterWith {
-            iter: self,
-            symbol_table,
-            func: parser,
-            phaton_data: PhantomData,
+        lexer: &'b mut L,
+    ) -> ParserIter<'a, 'b, L, Val, impl ParserWithState<'a, L, Val>> {
+        ParserIter {
+            lexer,
+            state: |lexer: &mut L| self.from_lexer(lexer),
+            last_err: false,
+            phantom_data: PhantomData,
         }
     }
+
+    fn parse(&mut self, lexer: &mut L) -> Result<Val, Self::Error> {
+        parse_wrapper(lexer, |lexer: &mut L| self.from_lexer(lexer))
+    }
+
+    fn from_lexer(&mut self, lexer: &mut L) -> Result<Val, Self::Error>;
 }
 
-impl<'a, I: LexerIterator<'a, LexToken<'a>, MyLexerError>> ParseIntoWith<'a> for I {}
+impl<'a, F, L, Val, E> ParserWithState<'a, L, Val> for F
+where
+    L: MyLexer<'a>,
+    F: FnMut(&mut L) -> Result<Val, E>,
+{
+    type Error = E;
 
-pub fn parse(source_code: &str) -> Result<SymbolTableType> {
-    let mut lexer = LexToken::lex(source_code);
-    trace!("starting parse");
-    let mut symbol_table = SymbolTableType::default();
-    let result: Result<TranslationUnit> = lexer.parse(&mut symbol_table);
-    trace!("finished parse");
-    result?;
-    Ok(symbol_table)
+    fn from_lexer(&mut self, lexer: &mut L) -> Result<Val, Self::Error> {
+        (self)(lexer)
+    }
 }

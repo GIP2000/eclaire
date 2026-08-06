@@ -1,8 +1,14 @@
 use clap::Parser;
-use eclaire::{all, fatal, info, parser::parse, trace, utils::logger::Level};
+use eclaire::{
+    fatal, info,
+    lexer::LexToken,
+    parser::{Parser as _, grammer::expression::Expression},
+    trace,
+    utils::logger::Level,
+};
 use std::{
     fs::File,
-    io::{stdin, stdout, Read},
+    io::{Read, stdin},
     path::PathBuf,
 };
 
@@ -112,47 +118,37 @@ fn main() -> anyhow::Result<()> {
     trace!("Finished reading source code");
     info!("source code = {}", source_code);
 
-    let table = match parse(&source_code) {
-        Ok(table) => {
-            all!("Finished succesfully");
-            info!("symbol table: {table:?}");
-            table
-        }
-        Err(x) => {
-            fatal!("Error making program {}", x);
-            return Err(anyhow::anyhow!("Error couldn't make program: {:?}", x));
-        }
-    };
+    let mut lexer = LexToken::lex(&source_code);
 
-    table.type_check().map_err(|err| {
-        fatal!("Error making program: {}", err);
-        err
-    })?;
+    let expr = Expression::parse(&mut lexer)?;
 
-    let mut file: std::fs::File;
-    let mut stdout = stdout();
-    let writer = match cli.output.as_ref() {
-        Some(path) => {
-            file = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(path)
-                .map_err(|err| {
-                    fatal!("Failed to open file {:?}: {:?}", path, err);
-                    err
-                })?;
-            &mut file as &mut dyn std::io::Write
-        }
-        None => &mut stdout as &mut dyn std::io::Write,
-    };
+    // TODO: Parse
+    // lexer.parse()?;
 
-    writeln!(writer, "{:?}", table).map_err(|err| {
-        match cli.output.as_ref() {
-            Some(path) => fatal!("Failed to write to file {:?}: {:?}", path, err),
-            None => fatal!("Failed to write to stdout: {:?}", err),
-        }
-        err
-    })?;
+    // let mut file: std::fs::File;
+    // let mut stdout = stdout();
+    // let _writer = match cli.output.as_ref() {
+    //     Some(path) => {
+    //         file = std::fs::OpenOptions::new()
+    //             .write(true)
+    //             .create(true)
+    //             .open(path)
+    //             .map_err(|err| {
+    //                 fatal!("Failed to open file {:?}: {:?}", path, err);
+    //                 err
+    //             })?;
+    //         &mut file as &mut dyn std::io::Write
+    //     }
+    //     None => &mut stdout as &mut dyn std::io::Write,
+    // };
+
+    // writeln!(writer, "{:?}", table).map_err(|err| {
+    //     match cli.output.as_ref() {
+    //         Some(path) => fatal!("Failed to write to file {:?}: {:?}", path, err),
+    //         None => fatal!("Failed to write to stdout: {:?}", err),
+    //     }
+    //     err
+    // })?;
 
     Ok(())
 }

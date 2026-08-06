@@ -123,6 +123,7 @@ dependencies = [
  "lexer",
  "llvm-sys",
  "paste",
+ "proc_compiler",
  "proc_lexer",
  "thiserror",
 ]
@@ -197,6 +198,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ee95bc4ef87b8d5ba32e8b7714ccc834865276eab0aed5c9958d00ec45f49e8"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "proc_compiler"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

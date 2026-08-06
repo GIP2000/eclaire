@@ -10,4 +10,5 @@ lexer = {path = "../lexer"}
 llvm-sys = "211.0.0"
 paste = "1.0.15"
 proc_lexer = {path = "../proc_lexer"}
+proc_compiler = {path = "../proc_compiler"}
 thiserror = "2.0.17"

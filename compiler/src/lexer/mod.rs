@@ -126,8 +126,6 @@ pub enum LexToken<'a> {
     Struct,
     #[regex("enum")]
     Enum,
-    #[regex("primative")]
-    Primative,
 
     #[regex("true", func = parse_bool_true)]
     #[regex("false", func = parse_bool_false)]
@@ -159,10 +157,40 @@ pub enum LexToken<'a> {
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*", func = parse_ident)]
     Ident(&'a str),
 
+    // Types
+    #[regex("u8")]
+    U8,
+    #[regex("u16")]
+    U16,
+    #[regex("u32")]
+    U32,
+    #[regex("u64")]
+    U64,
+    #[regex("u128")]
+    U128,
+
+    #[regex("i8")]
+    I8,
+    #[regex("i16")]
+    I16,
+    #[regex("i32")]
+    I32,
+    #[regex("i64")]
+    I64,
+    #[regex("i128")]
+    I128,
+
+    #[regex("type")]
+    Type,
+
     #[regex("[ \n\t]")]
     #[regex("//[^\n]*\n")]
     Skip,
 }
+
+pub trait MyLexer<'a>: lexer::LexerIterator<'a, LexToken<'a>, MyLexerError> {}
+
+impl<'a, T> MyLexer<'a> for T where T: lexer::LexerIterator<'a, LexToken<'a>, MyLexerError> {}
 
 impl<'a> LexToken<'a> {
     pub fn lex(input: &'a str) -> impl lexer::LexerIterator<'a, Self, MyLexerError> {

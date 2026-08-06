@@ -1,95 +1,13 @@
-use std::fmt::Display;
+#[derive(PartialEq)]
+pub struct Ident<'a>(&'a str);
 
-use lexer::LexerIterator;
+impl<'a> crate::parser::Parser<'a> for Ident<'a> {
+    type Error = super::Error;
 
-use crate::{
-    lexer::{LexToken, MyLexerError},
-    parser::{
-        grammer::assignment::TypeRespConcrete, symbol_table::SymbolTableType, Parse, ParserInto,
-        Result,
-    },
-    trace,
-};
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
-pub struct Ident {
-    pub value: Box<str>,
-}
-
-impl Display for Ident {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value)
-    }
-}
-
-impl<A> From<A> for Ident
-where
-    A: AsRef<str>,
-{
-    fn from(value: A) -> Self {
-        Ident {
-            value: value.as_ref().into(),
-        }
-    }
-}
-
-impl<A> PartialEq<A> for Ident
-where
-    A: AsRef<str>,
-{
-    fn eq(&self, other: &A) -> bool {
-        &*self.value == other.as_ref()
-    }
-}
-
-impl Parse for Ident {
-    fn from_lexer<'a>(
-        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        _: &mut SymbolTableType,
-    ) -> Result<Self> {
-        trace!("Entering Ident");
-        token_stream
-            .next_matches_func(|x| {
-                if let LexToken::Ident(x) = x {
-                    Some(Ident {
-                        value: x.to_owned().into(),
-                    })
-                } else {
-                    None
-                }
-            })
-            .map_err(|x| x.into())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct IdentPair {
-    pub name: Ident,
-    pub datatype: TypeRespConcrete,
-}
-
-impl Parse for IdentPair {
-    fn from_lexer<'a>(
-        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        symbol_table: &mut SymbolTableType,
-    ) -> Result<Self> {
-        trace!("Entering Ident Pair");
-        let name = token_stream.parse(symbol_table)?;
-        token_stream.next_matches(LexToken::Colon)?;
-        let datatype = token_stream.parse(symbol_table)?;
-        _ = token_stream.next_matches(LexToken::Comma);
-        Ok(Self { name, datatype })
-    }
-}
-
-impl Parse for (Ident, Option<TypeRespConcrete>) {
-    fn from_lexer<'a>(
-        token_stream: &mut impl LexerIterator<'a, LexToken<'a>, MyLexerError>,
-        symbol_table: &mut SymbolTableType,
-    ) -> Result<Self> {
-        token_stream
-            .parse(symbol_table)
-            .map(|x: IdentPair| (x.name, Some(x.datatype)))
-            .or_else(|_| token_stream.parse(symbol_table).map(|x: Ident| (x, None)))
+    fn from_lexer<L: crate::lexer::MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        Ok(Self(lexer.next_matches_func(|&x| match x {
+            crate::lexer::LexToken::Ident(x) => Some(x),
+            _ => None,
+        })?))
     }
 }

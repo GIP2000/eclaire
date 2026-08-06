@@ -1,15 +1,16 @@
 extern crate proc_macro;
 
 use lexer::{
-    dfa::{DFABoxed, DFA, DFA_SIZE},
     AcceptFunc,
+    dfa::{DFA, DFA_SIZE, DFABoxed},
 };
 use proc_macro::TokenStream;
 
 use quote::quote;
 use syn::{
+    Data, DeriveInput, Ident, LitStr,
     parse::{Parse, ParseStream},
-    parse_macro_input, Data, DeriveInput, Ident, LitStr,
+    parse_macro_input,
 };
 
 struct RegexAttributeArgs {
