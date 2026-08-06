@@ -3,11 +3,12 @@ use crate::parser::{
     grammer::{expression::BlockExpression, ident::Ident},
 };
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct FunctionSig<'a> {
     args: Box<[Ident<'a>]>,
 }
 
+#[derive(Debug)]
 pub struct Function<'a> {
     sig: FunctionSig<'a>,
     block: BlockExpression<'a>,

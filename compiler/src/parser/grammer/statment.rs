@@ -6,6 +6,7 @@ use crate::{
     },
 };
 
+#[derive(Debug)]
 pub enum IdentCreationType {
     Const,
     Let(bool),
@@ -30,6 +31,7 @@ impl<'a> Parser<'a> for IdentCreationType {
     }
 }
 
+#[derive(Debug)]
 pub enum LValue<'a> {
     Expression(super::expression::Expression<'a>),
     Function(super::function::Function<'a>),
@@ -45,6 +47,7 @@ impl<'a> Parser<'a> for LValue<'a> {
     }
 }
 
+#[derive(Debug)]
 pub enum Statment<'a> {
     IdentCreation(IdentCreationType, Ident<'a>, Option<Type<'a>>, LValue<'a>),
     Expression(super::expression::Expression<'a>),

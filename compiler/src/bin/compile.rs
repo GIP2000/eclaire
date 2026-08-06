@@ -120,8 +120,6 @@ fn main() -> anyhow::Result<()> {
 
     let mut lexer = LexToken::lex(&source_code);
 
-    let expr = Expression::parse(&mut lexer)?;
-
     // TODO: Parse
     // lexer.parse()?;
 

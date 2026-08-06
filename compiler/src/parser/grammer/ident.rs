@@ -1,4 +1,4 @@
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Ident<'a>(&'a str);
 
 impl<'a> crate::parser::Parser<'a> for Ident<'a> {

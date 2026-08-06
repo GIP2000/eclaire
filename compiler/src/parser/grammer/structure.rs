@@ -1,8 +1,8 @@
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Struct {}
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Union {}
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Enum {}

@@ -4,6 +4,7 @@ use proc_compiler::FromLexValue;
 
 use super::ident::Ident;
 use super::statment::Statment;
+use super::types::PrimativeTypes;
 
 macro_rules! chain_binary_op {
     ($name:ident : |$var:ident| $body:block, $next:ident : |$nvar:ident| $nbody:block $($rest:tt)*) => {
@@ -37,8 +38,10 @@ macro_rules! chain_binary_op {
     ($last:ident) => {};
 }
 
+#[derive(Debug)]
 pub struct BlockExpression<'a>(Box<[Statment<'a>]>, Box<Expression<'a>>);
 
+#[derive(Debug)]
 pub enum Expression<'a> {
     ConstantExpression(ConstantExpression<'a>),
     BinaryOp(Box<BinaryOp<'a>>),
@@ -204,6 +207,9 @@ impl<'a> Expression<'a> {
     fn unary_expression<L: MyLexer<'a>>(lexer: &mut L) -> super::Result<Expression<'a>> {
         let op: Box<_> = UnaryOperator::parse_many(lexer)
             .map_while(Result::ok)
+            .collect::<Box<_>>()
+            .into_iter()
+            .rev()
             .collect();
 
         let expr = Expression::postfix_expression.parse(lexer)?;
@@ -214,7 +220,7 @@ impl<'a> Expression<'a> {
     }
 }
 
-#[derive(FromLexValue)]
+#[derive(FromLexValue, Debug, Clone, Copy)]
 #[source(LexToken)]
 #[generic_impl_override(<'a>)]
 #[generic_source_override(<'a>)]
@@ -229,7 +235,6 @@ pub enum UnaryOperator {
     FromPointer,
     #[left(Carrot)]
     IntoPointer,
-
     #[skip]
     Array(Option<usize>),
 }
@@ -254,7 +259,7 @@ impl<'a> Parser<'a> for UnaryOperator {
     }
 }
 
-#[derive(FromLexValue)]
+#[derive(FromLexValue, Debug)]
 #[source(LexToken)]
 #[generic_impl_override(<'a>)]
 #[generic_source_override(<'a>)]
@@ -341,7 +346,7 @@ pub enum AssignmentOperator {
     Eq,
 }
 
-#[derive(FromLexValue)]
+#[derive(FromLexValue, Debug)]
 #[source(LexToken)]
 pub enum ConstantExpression<'a> {
     IntLit(&'a str),
@@ -349,6 +354,9 @@ pub enum ConstantExpression<'a> {
     StrLit(&'a str),
     CharLit(u8),
     BoolLit(bool),
+
+    #[skip]
+    PrimativeType(PrimativeTypes),
 }
 
 impl<'a> TryFrom<ConstantExpression<'a>> for usize {
@@ -367,16 +375,22 @@ impl<'a> Parser<'a> for ConstantExpression<'a> {
     type Error = super::Error;
 
     fn from_lexer<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
-        Ok(lexer.next_matches_func(|&x| x.try_into().ok())?)
+        Ok(lexer.next_matches_func(|&x| {
+            x.try_into()
+                .ok()
+                .or(PrimativeTypes::try_from(x).ok().map(Self::PrimativeType))
+        })?)
     }
 }
 
+#[derive(Debug)]
 pub struct BinaryOp<'a> {
     pub left: Expression<'a>,
     pub right: Expression<'a>,
     pub op: BinaryOperator,
 }
 
+#[derive(Debug)]
 pub struct UnaryExpression<'a> {
     pub expr: Expression<'a>,
     pub op: UnaryOperator,
