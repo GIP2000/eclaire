@@ -1,10 +1,11 @@
 use crate::lexer::{LexToken, MyLexer};
+use crate::parser::grammer::types::{ConcreteType, PrimativeTypes};
 use crate::parser::{Parser, ParserWithState};
+use anyhow::bail;
 use proc_compiler::FromLexValue;
 
 use super::ident::Ident;
 use super::statment::Statment;
-use super::types::PrimativeTypes;
 
 macro_rules! chain_binary_op {
     ($name:ident : |$var:ident| $body:block, $next:ident : |$nvar:ident| $nbody:block $($rest:tt)*) => {
@@ -41,6 +42,33 @@ macro_rules! chain_binary_op {
 #[derive(Debug)]
 pub struct BlockExpression<'a>(Box<[Statment<'a>]>, Box<Expression<'a>>);
 
+impl<'a> Parser<'a> for BlockExpression<'a> {
+    type Error = super::Error;
+
+    fn from_lexer<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        _ = lexer.next_matches(LexToken::OCBracket)?;
+
+        let stmts: Box<_> = Statment::parse_many(lexer).map_while(Result::ok).collect();
+
+        let has_return = lexer.next_matches(LexToken::Return).is_ok();
+        let return_expression = Expression::parse(lexer);
+
+        let return_expression = Box::new(match (return_expression, has_return) {
+            (Ok(e), true) => {
+                _ = lexer.next_matches(LexToken::SemiColon)?;
+                e
+            }
+            (Ok(e), false) => e,
+            (Err(_), false) => Expression::ConstantExpression(ConstantExpression::ConcreteType(
+                ConcreteType::Primative(PrimativeTypes::Void),
+            )),
+            (Err(_), true) => bail!("Error no return expression specified"),
+        });
+
+        Ok(Self(stmts, return_expression))
+    }
+}
+
 #[derive(Debug)]
 pub enum Expression<'a> {
     ConstantExpression(ConstantExpression<'a>),
@@ -49,7 +77,6 @@ pub enum Expression<'a> {
     Ident(Ident<'a>),
     List(Box<[Self]>),
     Block(BlockExpression<'a>),
-    Void,
 }
 
 impl<'a> Parser<'a> for Expression<'a> {
@@ -96,25 +123,27 @@ impl<'a> Expression<'a> {
                 }
                 PostfixOperator::Call => {
                     let mut must_stop = false;
-                    let result = Expression::List(
-                        (|lexer: &mut L| -> super::Result<Self> {
-                            if must_stop {
-                                anyhow::bail!("must stop");
-                            }
-                            let expr = Expression::parse(lexer)?;
+                    let result: Box<_> = (|lexer: &mut L| -> super::Result<Self> {
+                        if must_stop {
+                            anyhow::bail!("must stop");
+                        }
+                        let expr = Expression::parse(lexer)?;
 
-                            if let Err(_) = lexer.next_matches(LexToken::Comma) {
-                                must_stop = true;
-                            }
-                            Ok(expr)
-                        })
-                        .parse_many(lexer)
-                        .map_while(Result::ok)
-                        .collect(),
-                    );
+                        if let Err(_) = lexer.next_matches(LexToken::Comma) {
+                            must_stop = true;
+                        }
+                        Ok(expr)
+                    })
+                    .parse_many(lexer)
+                    .map_while(Result::ok)
+                    .collect();
+
+                    if !must_stop && result.len() > 0 {
+                        anyhow::bail!("Invalid expression")
+                    }
 
                     lexer.next_matches(LexToken::CParen)?;
-                    result
+                    Expression::List(result)
                 }
             };
 
@@ -127,20 +156,18 @@ impl<'a> Expression<'a> {
         }))
     }
 
-    fn primary_expression(lexer: &mut impl MyLexer<'a>) -> super::Result<Expression<'a>> {
+    fn primary_expression(lexer: &mut impl MyLexer<'a>) -> super::Result<Self> {
         if let Ok(_) = lexer.next_matches(LexToken::OParen) {
             let expr = Expression::parse(lexer)?;
             lexer.next_matches(LexToken::CParen)?;
             return Ok(expr);
         }
 
-        // TODO: block & Control Flow when I have statments
-
-        if let Ok(ident) = Ident::parse(lexer) {
-            return Ok(Expression::Ident(ident));
-        }
-
-        ConstantExpression::parse(lexer).map(Expression::ConstantExpression)
+        // TODO:  Control Flow when I have statments
+        BlockExpression::parse(lexer)
+            .map(Self::Block)
+            .or_else(|_| ConstantExpression::parse(lexer).map(Self::ConstantExpression))
+            .or_else(|_| Ident::parse(lexer).map(Self::Ident))
     }
 
     fn binary_op_builder<L, NextF, OpF>(
@@ -204,7 +231,7 @@ impl<'a> Expression<'a> {
         unary_expression
     );
 
-    fn unary_expression<L: MyLexer<'a>>(lexer: &mut L) -> super::Result<Expression<'a>> {
+    pub fn unary_expression<L: MyLexer<'a>>(lexer: &mut L) -> super::Result<Self> {
         let op: Box<_> = UnaryOperator::parse_many(lexer)
             .map_while(Result::ok)
             .collect::<Box<_>>()
@@ -212,7 +239,7 @@ impl<'a> Expression<'a> {
             .rev()
             .collect();
 
-        let expr = Expression::postfix_expression.parse(lexer)?;
+        let expr = Self::postfix_expression.parse(lexer)?;
 
         Ok(op.into_iter().fold(expr, |expr, op| {
             Self::UnaryOp(Box::new(UnaryExpression { expr, op }))
@@ -356,7 +383,7 @@ pub enum ConstantExpression<'a> {
     BoolLit(bool),
 
     #[skip]
-    PrimativeType(PrimativeTypes),
+    ConcreteType(ConcreteType<'a>),
 }
 
 impl<'a> TryFrom<ConstantExpression<'a>> for usize {
@@ -375,11 +402,9 @@ impl<'a> Parser<'a> for ConstantExpression<'a> {
     type Error = super::Error;
 
     fn from_lexer<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
-        Ok(lexer.next_matches_func(|&x| {
-            x.try_into()
-                .ok()
-                .or(PrimativeTypes::try_from(x).ok().map(Self::PrimativeType))
-        })?)
+        Ok(lexer
+            .next_matches_func(|&x| x.try_into().ok())
+            .or_else(|_| ConcreteType::parse(lexer).map(Self::ConcreteType))?)
     }
 }
 

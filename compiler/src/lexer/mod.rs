@@ -124,6 +124,8 @@ pub enum LexToken<'a> {
 
     #[regex("struct")]
     Struct,
+    #[regex("union")]
+    Union,
     #[regex("enum")]
     Enum,
 
@@ -179,6 +181,9 @@ pub enum LexToken<'a> {
     I64,
     #[regex("i128")]
     I128,
+
+    #[regex("void")]
+    Void,
 
     #[regex("type")]
     Type,

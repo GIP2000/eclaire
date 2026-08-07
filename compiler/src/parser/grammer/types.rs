@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
 
+use crate::parser::ParserWithState;
+
 use proc_compiler::FromLexValue;
 
 use crate::{
@@ -31,6 +33,8 @@ pub enum PrimativeTypes {
     I64,
     I128,
 
+    Void,
+
     Type,
 }
 
@@ -40,6 +44,58 @@ pub enum TypeIndirection {
     Array(Option<usize>),
     #[left(IntoPointer)]
     Pointer,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ConcreteType<'a> {
+    Struct(Struct<'a>),
+    Union(Union<'a>),
+    Enum(Enum<'a>),
+    Primative(PrimativeTypes),
+    Function(FunctionSig<'a>),
+}
+
+impl<'a> Parser<'a> for ConcreteType<'a> {
+    type Error = super::Error;
+
+    fn from_lexer<L: crate::lexer::MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        lexer
+            .next_matches_func(|&x| x.try_into().ok())
+            .map(Self::Primative)
+            .or_else(|_| Ok(Self::Struct(Struct::parse(lexer)?)))
+            .or_else(|_: super::Error| Ok(Self::Function(FunctionSig::parse(lexer)?)))
+            .or_else(|_: super::Error| Ok(Self::Enum(Enum::parse(lexer)?)))
+            .or_else(|_: super::Error| Ok(Self::Union(Union::parse(lexer)?)))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Type<'a> {
+    indirection: Box<[TypeIndirection]>,
+    concrete_type: ConcreteType<'a>,
+}
+
+impl<'a> From<ConcreteType<'a>> for Type<'a> {
+    fn from(value: ConcreteType<'a>) -> Self {
+        Self {
+            indirection: Box::new([]),
+            concrete_type: value,
+        }
+    }
+}
+
+impl<'a> Parser<'a> for Type<'a> {
+    type Error = super::Error;
+
+    fn from_lexer<L: crate::lexer::MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        Expression::unary_expression
+            .parse(lexer)
+            .map(|x| match x {
+                Expression::UnaryOp(box unary_expression) => unary_expression,
+                _ => unreachable!("I parsed a unary_expression"),
+            })
+            .and_then(|x| x.try_into())
+    }
 }
 
 impl<'a> TryFrom<UnaryExpression<'a>> for Type<'a> {
@@ -61,9 +117,7 @@ impl<'a> TryFrom<UnaryExpression<'a>> for Type<'a> {
                     value = *unary_expression;
                     continue;
                 }
-                Expression::ConstantExpression(ConstantExpression::PrimativeType(typ)) => {
-                    ConcreteType::Primative(typ)
-                }
+                Expression::ConstantExpression(ConstantExpression::ConcreteType(typ)) => typ,
                 Expression::Ident(_) => todo!("need to implement symbol table"),
                 x => anyhow::bail!("Cannot convert Expression to type: {:?} ", x),
             };
@@ -73,28 +127,5 @@ impl<'a> TryFrom<UnaryExpression<'a>> for Type<'a> {
                 concrete_type,
             });
         }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub enum ConcreteType<'a> {
-    Struct(Struct),
-    Union(Union),
-    Enum(Enum),
-    Primative(PrimativeTypes),
-    Function(FunctionSig<'a>),
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Type<'a> {
-    indirection: Box<[TypeIndirection]>,
-    concrete_type: ConcreteType<'a>,
-}
-
-impl<'a> Parser<'a> for Type<'a> {
-    type Error = super::Error;
-
-    fn from_lexer<L: crate::lexer::MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
-        todo!()
     }
 }

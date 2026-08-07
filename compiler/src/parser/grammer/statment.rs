@@ -1,12 +1,12 @@
 use crate::{
     lexer::{LexToken, MyLexer},
     parser::{
-        Parser,
+        Parser, ParserWithState as _,
         grammer::{expression::Expression, function::Function, ident::Ident, types::Type},
     },
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum IdentCreationType {
     Const,
     Let(bool),
@@ -48,12 +48,14 @@ impl<'a> Parser<'a> for LValue<'a> {
 }
 
 #[derive(Debug)]
-pub enum Statment<'a> {
-    IdentCreation(IdentCreationType, Ident<'a>, Option<Type<'a>>, LValue<'a>),
-    Expression(super::expression::Expression<'a>),
+pub struct IdentCreation<'a> {
+    pub ic_type: IdentCreationType,
+    pub ident: Ident<'a>,
+    pub type_val: Option<Type<'a>>,
+    pub lvalue: LValue<'a>,
 }
 
-impl<'a> Parser<'a> for Statment<'a> {
+impl<'a> Parser<'a> for IdentCreation<'a> {
     type Error = super::Error;
 
     fn from_lexer<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
@@ -70,14 +72,42 @@ impl<'a> Parser<'a> for Statment<'a> {
 
         let lvalue = LValue::parse(lexer)?;
 
+        _ = lexer.next_matches(LexToken::SemiColon)?;
+
         match (ic_type, lvalue) {
             (ic_type @ IdentCreationType::Let(_), lvalue @ LValue::Expression(_))
-            | (ic_type @ IdentCreationType::Const, lvalue) => {
-                Ok(Self::IdentCreation(ic_type, ident, type_val, lvalue))
-            }
+            | (ic_type @ IdentCreationType::Const, lvalue) => Ok(Self {
+                ic_type,
+                ident,
+                type_val,
+                lvalue,
+            }),
             _ => Err(anyhow::anyhow!(
                 "Error Let value must have a non-const lvalue"
             )),
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum Statment<'a> {
+    IdentCreation(IdentCreation<'a>),
+    Expression(super::expression::Expression<'a>),
+}
+
+impl<'a> Parser<'a> for Statment<'a> {
+    type Error = super::Error;
+
+    fn from_lexer<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        (|lexer: &mut L| {
+            Expression::parse(lexer).and_then(|e| {
+                lexer
+                    .next_matches(LexToken::SemiColon)
+                    .map(|_| Self::Expression(e))
+                    .map_err(Into::into)
+            })
+        })
+        .parse(lexer)
+        .or_else(|_| IdentCreation::parse(lexer).map(Self::IdentCreation))
     }
 }
