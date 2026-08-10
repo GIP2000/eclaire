@@ -1,21 +1,27 @@
-pub struct IterPlusError<C, ErrorType>(pub C, pub Option<ErrorType>)
-where
-    C: Default;
+use crate::debug;
+
+pub struct IterPlusError<C, ErrorType>(pub C, pub Option<ErrorType>);
 
 impl<I, C, ErrorType> FromIterator<Result<I, ErrorType>> for IterPlusError<C, ErrorType>
 where
-    C: FromIterator<I> + Default,
+    C: FromIterator<I>,
+    ErrorType: std::fmt::Debug,
 {
     fn from_iter<T: IntoIterator<Item = Result<I, ErrorType>>>(iter: T) -> Self {
-        let mut iter = iter.into_iter();
-        let result = iter.by_ref().map_while(|x| x.ok()).collect();
+        let iter = iter.into_iter();
 
-        let following = iter.next().and_then(|x| match x {
-            Ok(_) => unreachable!(
-                "[FromIterator::IterPlusError]: I should have taken all the OK values already "
-            ),
-            Err(err) => Some(err),
-        });
+        let mut following = None;
+
+        let result = iter
+            .map_while(|x| match x {
+                x @ Ok(_) => x.ok(),
+                Err(err) => {
+                    debug!("{err:?}");
+                    following = Some(err);
+                    None
+                }
+            })
+            .collect();
 
         IterPlusError(result, following)
     }

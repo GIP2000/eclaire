@@ -1,4 +1,5 @@
 use crate::{
+    debug,
     lexer::{LexToken, MyLexer},
     parser::{
         Parser, ParserWithState,
@@ -8,6 +9,7 @@ use crate::{
             types::{ConcreteType, PrimativeTypes, Type},
         },
     },
+    trace,
 };
 
 #[derive(Debug, PartialEq)]
@@ -20,11 +22,12 @@ impl<'a> Parser<'a> for FunctionSig<'a> {
     type Error = super::Error;
 
     fn from_lexer<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        trace!("In function sig");
         _ = lexer.next_matches(LexToken::Fn)?;
         _ = lexer.next_matches(LexToken::OParen)?;
 
         let mut must_stop = false;
-        let args: Box<_> = (|lexer: &mut L| {
+        let args: Box<_> = (|lexer: &mut L| -> anyhow::Result<_> {
             if must_stop {
                 anyhow::bail!("must stop reached");
             }
@@ -32,6 +35,7 @@ impl<'a> Parser<'a> for FunctionSig<'a> {
             let ident = Ident::parse(lexer)?;
             _ = lexer.next_matches(LexToken::Colon)?;
             let typ = Type::parse(lexer)?;
+
             if let Err(_) = lexer.next_matches(LexToken::Comma) {
                 must_stop = true;
             }
@@ -43,13 +47,14 @@ impl<'a> Parser<'a> for FunctionSig<'a> {
         .collect();
 
         if !must_stop && args.len() > 0 {
-            anyhow::bail!("Invalid syntax for function argument");
+            return Err(super::Error::DoesNotMatch(
+                "Invalid syntax for function argument",
+            ));
         }
 
         _ = lexer.next_matches(LexToken::CParen)?;
 
-        let ret = Box::new(if let Ok(_) = lexer.next_matches(LexToken::Minus) {
-            _ = lexer.next_matches(LexToken::Gt)?;
+        let ret = Box::new(if let Ok(_) = lexer.next_matches(LexToken::SkinnyArrow) {
             Type::parse(lexer)?
         } else {
             Type::from(ConcreteType::Primative(PrimativeTypes::Void))
@@ -69,6 +74,7 @@ impl<'a> Parser<'a> for Function<'a> {
     type Error = super::Error;
 
     fn from_lexer<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        trace!("In function");
         let sig = FunctionSig::parse(lexer)?;
         let block = BlockExpression::parse(lexer)?;
 

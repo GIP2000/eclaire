@@ -37,7 +37,7 @@ impl<'a> Parser<'a> for Fields<'a> {
         .collect();
 
         if !must_stop && fields.len() > 1 {
-            anyhow::bail!("");
+            return Err(super::Error::DoesNotMatch("Invalid Field"));
         }
 
         _ = lexer.next_matches(LexToken::CCBracket)?;
@@ -82,6 +82,7 @@ impl<'a> Parser<'a> for Enum<'a> {
     type Error = super::Error;
 
     fn from_lexer<L: crate::lexer::MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
-        todo!()
+        Err(super::Error::DoesNotMatch("Enum Not yet implemented"))
+        // TODO: Actually implement
     }
 }

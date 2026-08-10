@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::parser::ParserWithState;
+use crate::{debug, parser::ParserWithState, trace};
 
 use proc_compiler::FromLexValue;
 
@@ -59,6 +59,7 @@ impl<'a> Parser<'a> for ConcreteType<'a> {
     type Error = super::Error;
 
     fn from_lexer<L: crate::lexer::MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        trace!("concrete type");
         lexer
             .next_matches_func(|&x| x.try_into().ok())
             .map(Self::Primative)
@@ -88,38 +89,37 @@ impl<'a> Parser<'a> for Type<'a> {
     type Error = super::Error;
 
     fn from_lexer<L: crate::lexer::MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        trace!("type");
         Expression::unary_expression
             .parse(lexer)
-            .map(|x| match x {
-                Expression::UnaryOp(box unary_expression) => unary_expression,
-                _ => unreachable!("I parsed a unary_expression"),
-            })
-            .and_then(|x| x.try_into())
+            .and_then(TryInto::try_into)
     }
 }
 
-impl<'a> TryFrom<UnaryExpression<'a>> for Type<'a> {
+impl<'a> TryFrom<Expression<'a>> for Type<'a> {
     type Error = super::Error;
 
-    fn try_from(mut value: UnaryExpression<'a>) -> Result<Self, Self::Error> {
+    fn try_from(mut value: Expression<'a>) -> Result<Self, Self::Error> {
         let mut v = VecDeque::new();
 
         loop {
-            let type_indirection: TypeIndirection = value
-                .op
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("Cannot convert Operand to type: {:?}", value.op))?;
-
-            v.push_front(type_indirection);
-
-            let concrete_type = match value.expr {
+            let concrete_type = match value {
                 Expression::UnaryOp(unary_expression) => {
-                    value = *unary_expression;
+                    value = unary_expression.expr;
+
+                    let type_indirection: TypeIndirection =
+                        unary_expression.op.try_into().map_err(|_| {
+                            super::Error::DoesNotMatch("Cannot convert Operand to type")
+                        })?;
+
+                    v.push_front(type_indirection);
+
                     continue;
                 }
                 Expression::ConstantExpression(ConstantExpression::ConcreteType(typ)) => typ,
-                Expression::Ident(_) => todo!("need to implement symbol table"),
-                x => anyhow::bail!("Cannot convert Expression to type: {:?} ", x),
+                // Expression::Ident(_) => todo!("need to implement symbol table"),
+                _ => return Err(super::Error::DoesNotMatch("Cannot convert Operand to type")),
+                // super::Error::DoesNotMatch("Cannot convert Operand to type: {:?}", x.op)
             };
 
             return Ok(Self {

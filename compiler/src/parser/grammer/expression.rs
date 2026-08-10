@@ -1,6 +1,7 @@
 use crate::lexer::{LexToken, MyLexer};
 use crate::parser::grammer::types::{ConcreteType, PrimativeTypes};
 use crate::parser::{Parser, ParserWithState};
+use crate::trace;
 use anyhow::bail;
 use proc_compiler::FromLexValue;
 
@@ -62,8 +63,13 @@ impl<'a> Parser<'a> for BlockExpression<'a> {
             (Err(_), false) => Expression::ConstantExpression(ConstantExpression::ConcreteType(
                 ConcreteType::Primative(PrimativeTypes::Void),
             )),
-            (Err(_), true) => bail!("Error no return expression specified"),
+            (Err(_), true) => {
+                return Err(super::Error::DoesNotMatch(
+                    "return Specified but no return type expression found",
+                ));
+            }
         });
+        _ = lexer.next_matches(LexToken::CCBracket)?;
 
         Ok(Self(stmts, return_expression))
     }
@@ -106,6 +112,7 @@ impl<'a> Parser<'a> for Expression<'a> {
 
 impl<'a> Expression<'a> {
     fn postfix_expression<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, super::Error> {
+        trace!("postfix_expression");
         let left = Self::primary_expression.parse(lexer)?;
 
         Ok((|lexer: &mut L| -> super::Result<_> {
@@ -123,7 +130,7 @@ impl<'a> Expression<'a> {
                 }
                 PostfixOperator::Call => {
                     let mut must_stop = false;
-                    let result: Box<_> = (|lexer: &mut L| -> super::Result<Self> {
+                    let result: Box<_> = (|lexer: &mut L| -> anyhow::Result<Self> {
                         if must_stop {
                             anyhow::bail!("must stop");
                         }
@@ -139,7 +146,7 @@ impl<'a> Expression<'a> {
                     .collect();
 
                     if !must_stop && result.len() > 0 {
-                        anyhow::bail!("Invalid expression")
+                        return Err(super::Error::DoesNotMatch("Invalid Expression in Call"));
                     }
 
                     lexer.next_matches(LexToken::CParen)?;
@@ -157,6 +164,7 @@ impl<'a> Expression<'a> {
     }
 
     fn primary_expression(lexer: &mut impl MyLexer<'a>) -> super::Result<Self> {
+        trace!("primary_expression");
         if let Ok(_) = lexer.next_matches(LexToken::OParen) {
             let expr = Expression::parse(lexer)?;
             lexer.next_matches(LexToken::CParen)?;
@@ -232,6 +240,7 @@ impl<'a> Expression<'a> {
     );
 
     pub fn unary_expression<L: MyLexer<'a>>(lexer: &mut L) -> super::Result<Self> {
+        trace!("unary_expression");
         let op: Box<_> = UnaryOperator::parse_many(lexer)
             .map_while(Result::ok)
             .collect::<Box<_>>()
@@ -392,8 +401,12 @@ impl<'a> TryFrom<ConstantExpression<'a>> for usize {
     fn try_from(value: ConstantExpression<'a>) -> Result<Self, Self::Error> {
         use ConstantExpression::*;
         match value {
-            IntLit(x) => x.parse().map_err(Self::Error::from),
-            _ => Err(anyhow::anyhow!("")),
+            IntLit(x) => x
+                .parse()
+                .map_err(|_| super::Error::DoesNotMatch("Must be a consant integer value")),
+            _ => Err(super::Error::DoesNotMatch(
+                "Must be a constant integer value",
+            )),
         }
     }
 }
@@ -402,6 +415,7 @@ impl<'a> Parser<'a> for ConstantExpression<'a> {
     type Error = super::Error;
 
     fn from_lexer<L: MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+        trace!("constant expression");
         Ok(lexer
             .next_matches_func(|&x| x.try_into().ok())
             .or_else(|_| ConcreteType::parse(lexer).map(Self::ConcreteType))?)

@@ -3,7 +3,7 @@ pub mod symbol_table;
 
 use std::marker::PhantomData;
 
-use crate::lexer::MyLexer;
+use crate::{debug, lexer::MyLexer};
 
 pub struct ParserIter<'a, 'b, L, V, S>
 where
@@ -42,9 +42,16 @@ fn parse_wrapper<'a, L, V, E, F>(lexer: &mut L, mut f: F) -> Result<V, E>
 where
     L: MyLexer<'a>,
     F: FnMut(&mut L) -> Result<V, E>,
+    E: std::fmt::Debug,
 {
     let mut obj = lexer.clone();
-    let res = f(&mut obj)?;
+    let res = f(&mut obj);
+
+    if let Err(err) = &res {
+        debug!("Parser error found: {err:?}");
+    };
+
+    let res = res?;
     *lexer = obj;
     Ok(res)
 }
@@ -53,11 +60,11 @@ pub trait Parser<'a>
 where
     Self: Sized,
 {
-    type Error;
+    type Error: std::fmt::Debug;
 
     fn parse_many<'b, L: MyLexer<'a>>(
         lexer: &'b mut L,
-    ) -> ParserIter<'a, 'b, L, Self, impl ParserWithState<'a, L, Self>> {
+    ) -> ParserIter<'a, 'b, L, Self, impl ParserWithState<'a, L, Self, Error = Self::Error>> {
         ParserIter {
             lexer,
             state: Self::from_lexer,
@@ -74,7 +81,7 @@ where
 }
 
 pub trait ParserWithState<'a, L: MyLexer<'a>, Val> {
-    type Error;
+    type Error: std::fmt::Debug;
     fn parse_many<'b>(
         &mut self,
         lexer: &'b mut L,
@@ -98,6 +105,7 @@ impl<'a, F, L, Val, E> ParserWithState<'a, L, Val> for F
 where
     L: MyLexer<'a>,
     F: FnMut(&mut L) -> Result<Val, E>,
+    E: std::fmt::Debug,
 {
     type Error = E;
 

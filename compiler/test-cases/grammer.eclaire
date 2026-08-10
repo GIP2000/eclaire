@@ -1,0 +1,16 @@
+const function_name = fn(foo: u32) -> u32 {
+    foo + 4
+};
+
+const function_name2 = fn(foo: i32) -> i32 {
+    return foo + 4;
+};
+
+const function_name3 = fn(foo: i64) -> i64 {
+    let a = foo + 4;
+
+    let b = a * foo;
+
+    b + foo
+};
+

@@ -148,17 +148,6 @@ pub enum LexToken<'a> {
     #[regex("continue")]
     Continue,
 
-    #[regex("\"[^\"]*\"", func = parse_string)]
-    StrLit(&'a str),
-    #[regex("[0-9][0-9]*\\.[0-9]*", func = parse_float)]
-    FloatLit(&'a str),
-    #[regex("[0-9][0-9]*", func = parse_int)]
-    IntLit(&'a str),
-    #[regex("'[^\n' ]'", func = parse_char)]
-    CharLit(u8),
-    #[regex("[a-zA-Z_][a-zA-Z0-9_]*", func = parse_ident)]
-    Ident(&'a str),
-
     // Types
     #[regex("u8")]
     U8,
@@ -187,6 +176,17 @@ pub enum LexToken<'a> {
 
     #[regex("type")]
     Type,
+
+    #[regex("\"[^\"]*\"", func = parse_string)]
+    StrLit(&'a str),
+    #[regex("[0-9][0-9]*\\.[0-9]*", func = parse_float)]
+    FloatLit(&'a str),
+    #[regex("[0-9][0-9]*", func = parse_int)]
+    IntLit(&'a str),
+    #[regex("'[^\n' ]'", func = parse_char)]
+    CharLit(u8),
+    #[regex("[a-zA-Z_][a-zA-Z0-9_]*", func = parse_ident)]
+    Ident(&'a str),
 
     #[regex("[ \n\t]")]
     #[regex("//[^\n]*\n")]

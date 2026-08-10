@@ -1,8 +1,13 @@
-use anyhow::anyhow;
+use lexer::LexerIteratorError;
+use thiserror::Error;
 
-use crate::parser::{
-    Parser,
-    grammer::statment::{IdentCreation, IdentCreationType},
+use crate::{
+    lexer::MyLexerError,
+    parser::{
+        Parser,
+        grammer::statment::{IdentCreation, IdentCreationType},
+    },
+    utils::iterator::IterPlusError,
 };
 
 pub mod expression;
@@ -12,7 +17,20 @@ pub mod statment;
 pub mod structure;
 pub mod types;
 
-pub type Error = anyhow::Error;
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("{0}")]
+    LexerIteratorError(LexerIteratorError<MyLexerError>),
+
+    #[error("Does not match: {0}")]
+    DoesNotMatch(&'static str),
+}
+
+impl From<LexerIteratorError<MyLexerError>> for Error {
+    fn from(value: LexerIteratorError<MyLexerError>) -> Self {
+        Self::LexerIteratorError(value)
+    }
+}
 
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -25,21 +43,25 @@ impl<'a> Parser<'a> for TranslationUnion<'a> {
     fn from_lexer<L: crate::lexer::MyLexer<'a>>(
         lexer: &mut L,
     ) -> std::result::Result<Self, Self::Error> {
-        Ok(Self(
-            IdentCreation::parse_many(lexer)
-                .map(
-                    |x| match x.map_err(|_| anyhow!("No Ident Creation Pattern found")) {
-                        r @ Ok(IdentCreation {
-                            ic_type: IdentCreationType::Const,
-                            ident: _,
-                            type_val: _,
-                            lvalue: _,
-                        }) => r,
-                        Ok(_) => Err(anyhow!(" Ident Cration pattern must be Const Type")),
-                        Err(err) => Err(err),
-                    },
-                )
-                .collect::<Result<_>>()?,
-        ))
+        let IterPlusError(v, err) = IdentCreation::parse_many(lexer)
+            .map(|x| match x {
+                r @ Ok(IdentCreation {
+                    ic_type: IdentCreationType::Const,
+                    ident: _,
+                    type_val: _,
+                    lvalue: _,
+                }) => r,
+                Ok(_) => Err(Error::DoesNotMatch(
+                    "Ident Cration pattern must be Const Type",
+                )),
+                Err(err) => Err(err),
+            })
+            .collect();
+
+        match err {
+            Some(Error::LexerIteratorError(LexerIteratorError::NoMoreTokens)) => Ok(Self(v)),
+            Some(err) => Err(err),
+            None => Err(Error::DoesNotMatch("Empty File")),
+        }
     }
 }

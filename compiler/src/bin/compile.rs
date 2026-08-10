@@ -2,7 +2,11 @@ use clap::Parser;
 use eclaire::{
     fatal, info,
     lexer::LexToken,
-    parser::{Parser as _, grammer::expression::Expression},
+    log,
+    parser::{
+        Parser as _,
+        grammer::{TranslationUnion, expression::Expression},
+    },
     trace,
     utils::logger::Level,
 };
@@ -119,6 +123,10 @@ fn main() -> anyhow::Result<()> {
     info!("source code = {}", source_code);
 
     let mut lexer = LexToken::lex(&source_code);
+
+    let tu = TranslationUnion::parse(&mut lexer)?;
+
+    println!("{:?}", tu);
 
     // TODO: Parse
     // lexer.parse()?;
