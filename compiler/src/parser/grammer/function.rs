@@ -1,5 +1,4 @@
 use crate::{
-    debug,
     lexer::{LexToken, MyLexer},
     parser::{
         Parser, ParserWithState,
@@ -66,8 +65,8 @@ impl<'a> Parser<'a> for FunctionSig<'a> {
 
 #[derive(Debug)]
 pub struct Function<'a> {
-    sig: FunctionSig<'a>,
-    block: BlockExpression<'a>,
+    pub sig: FunctionSig<'a>,
+    pub block: BlockExpression<'a>,
 }
 
 impl<'a> Parser<'a> for Function<'a> {

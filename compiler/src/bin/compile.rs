@@ -2,11 +2,7 @@ use clap::Parser;
 use eclaire::{
     fatal, info,
     lexer::LexToken,
-    log,
-    parser::{
-        Parser as _,
-        grammer::{TranslationUnion, expression::Expression},
-    },
+    parser::{Parser as _, grammer::TranslationUnion},
     trace,
     utils::logger::Level,
 };

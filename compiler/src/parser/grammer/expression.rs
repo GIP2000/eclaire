@@ -2,7 +2,6 @@ use crate::lexer::{LexToken, MyLexer};
 use crate::parser::grammer::types::{ConcreteType, PrimativeTypes};
 use crate::parser::{Parser, ParserWithState};
 use crate::trace;
-use anyhow::bail;
 use proc_compiler::FromLexValue;
 
 use super::ident::Ident;
@@ -41,7 +40,7 @@ macro_rules! chain_binary_op {
 }
 
 #[derive(Debug)]
-pub struct BlockExpression<'a>(Box<[Statment<'a>]>, Box<Expression<'a>>);
+pub struct BlockExpression<'a>(pub Box<[Statment<'a>]>, pub Box<Expression<'a>>);
 
 impl<'a> Parser<'a> for BlockExpression<'a> {
     type Error = super::Error;

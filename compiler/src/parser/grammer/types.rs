@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::{debug, parser::ParserWithState, trace};
+use crate::{parser::ParserWithState, trace};
 
 use proc_compiler::FromLexValue;
 
@@ -9,7 +9,7 @@ use crate::{
     parser::{
         Parser,
         grammer::{
-            expression::{ConstantExpression, Expression, UnaryExpression, UnaryOperator},
+            expression::{ConstantExpression, Expression, UnaryOperator},
             function::FunctionSig,
             structure::{Enum, Struct, Union},
         },

@@ -10,8 +10,8 @@ use llvm_sys::{
 pub struct LLVMJitCompiler {
     // context: LLVMContext,
     // module: LLVMModule,
-    jit_builder: LLVMOrcLLJITBuilderRef,
-    orc: LLVMOrcLLJITRef,
+    pub jit_builder: LLVMOrcLLJITBuilderRef,
+    pub orc: LLVMOrcLLJITRef,
 }
 
 impl LLVMJitCompiler {

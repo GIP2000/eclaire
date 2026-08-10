@@ -81,7 +81,7 @@ pub struct Enum<'a>(PhantomData<&'a ()>);
 impl<'a> Parser<'a> for Enum<'a> {
     type Error = super::Error;
 
-    fn from_lexer<L: crate::lexer::MyLexer<'a>>(lexer: &mut L) -> Result<Self, Self::Error> {
+    fn from_lexer<L: crate::lexer::MyLexer<'a>>(_: &mut L) -> Result<Self, Self::Error> {
         Err(super::Error::DoesNotMatch("Enum Not yet implemented"))
         // TODO: Actually implement
     }
